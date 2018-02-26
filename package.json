@@ -1,0 +1,11 @@
+{
+  "name": "testpage.github.io",
+  "version": "1.0.0",
+  "main": "index.js",
+  "repository": "git@github.com:piochelepiotr/testpage.github.io.git",
+  "author": "Piotr Wolski <piotr.wolski@telecom-paristech.fr>",
+  "license": "MIT",
+  "dependencies": {
+    "jquery": "^3.3.1"
+  }
+}
