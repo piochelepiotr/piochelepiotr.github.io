@@ -6,7 +6,7 @@ function start()
     interval = setInterval(
         function()
         {
-            updateDisplay(Date.now() - startTime);
+            updateDisplay(Math.trunc((Date.now() - startTime)/1000));
         }, 1);
 }
 
