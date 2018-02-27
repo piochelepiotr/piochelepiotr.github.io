@@ -12,7 +12,7 @@ function start()
 
 function updateDisplay(currentTime)
 {
-    $("p.timer").html(currentTime);
+    $("h1.timer").html(currentTime);
 }
 
 start();
