@@ -7,7 +7,7 @@ function start()
         function()
         {
             updateDisplay(Date.now() - startTime);
-        });
+        }, 1);
 }
 
 function updateDisplay(currentTime)
