@@ -34,9 +34,10 @@ jobs:
         
       # run tests!
       - run: yarn test
-  deployment:
-    production:
-      branch: master
-      codedeploy:
-        test:
-          deployment_group: production-instance-group
+
+deployment:
+  production:
+    branch: master
+    codedeploy:
+      test:
+        deployment_group: production-instance-group
