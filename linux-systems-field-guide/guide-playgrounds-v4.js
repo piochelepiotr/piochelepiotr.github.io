@@ -233,6 +233,7 @@ readelf -n program    # notes and build ID`)}
           <p>A symbol table entry includes a name, type, binding, visibility, section, value, and size. Local symbols stay within an object. Global symbols participate in linking. Weak symbols may remain unresolved or lose to a strong definition.</p>
           <h2>Static and dynamic symbol tables</h2>
           <p><code>.symtab</code> is the fuller link/debug table and may be stripped. <code>.dynsym</code> contains symbols needed at runtime. A symbol can exist in one and not the other.</p>
+          <div class="system-lab" data-lab="symbol-scope"></div>
           ${code("C · optional dependency", `extern int optional_feature(void) __attribute__((weak));
 
 if (optional_feature != NULL) {
@@ -357,6 +358,7 @@ readelf -l /proc/$PID/exe`)}
         summary: "Virtual memory separates address ranges from physical storage. Pages are populated, protected, shared, reclaimed, and faulted independently.",
         body: `
           <p>Creating a virtual mapping reserves an address range and defines how accesses should be handled. Physical pages can be attached lazily on first access. A page fault is the CPU asking the kernel to resolve an access—not automatically an application error.</p>
+          <div class="system-lab" data-lab="page-decoder"></div>
           <div class="terminal-figure">
             <div class="terminal-titlebar"><span class="terminal-dots"><i></i><i></i><i></i></span>load byte at virtual address 0x7f12_3456_078a</div>
             <div class="step-trace">
@@ -425,6 +427,7 @@ if (p == MAP_FAILED) {
         summary: "Every thread has its own stack. The initial thread and pthread-created threads acquire their sizes through related but distinct mechanisms.",
         body: `
           <p>A stack holds call frames, saved registers, return addresses, and many automatic objects. It normally grows downward on common Linux architectures, but portable C does not promise that direction.</p>
+          <div class="system-lab" data-lab="stack-budget"></div>
           <div class="terminal-figure">
             <div class="terminal-titlebar"><span class="terminal-dots"><i></i><i></i><i></i></span>x86-64 example · main calls parse(42)</div>
             <div class="terminal-body">
@@ -525,6 +528,7 @@ prlimit --pid $PID`)}
         body: `
           <p>A file descriptor is just a small non-negative integer in your program—often <code>0</code>, <code>1</code>, <code>2</code>, or <code>3</code>. It is <strong>not a pointer</strong>, does not contain the file’s bytes, and does not contain a pathname. The kernel uses it as an array index.</p>
           <div class="timeline-demo" data-timeline="fd"></div>
+          <div class="system-lab" data-lab="fd-table"></div>
 
           <h2>What is physically stored in the C variable?</h2>
           <div class="terminal-figure">
@@ -1043,6 +1047,7 @@ if (error != NULL) {
           <div class="timeline-demo" data-timeline="plt"></div>
 
           ${callout("PLT code versus GOT data", `The PLT does not have one mutable pointer value. It is machine code stored around <code>0x401030</code> in an executable R-X mapping. Its “value” is its instruction bytes. The GOT slot is separate data at <code>0x404000</code>; those eight bytes store one pointer and are what the loader edits.`)}
+          <div class="system-lab" data-lab="plt-resolver"></div>
 
           <h2>The three pieces</h2>
           <div class="terminal-figure">
@@ -1669,6 +1674,332 @@ function mountAmbientAnimations() {
   timelineCleanups.push(() => observer.disconnect());
 }
 
+function labShell(title, mission, controls) {
+  return `
+    <section class="lab-shell" aria-label="${escapeHtml(title)}">
+      <div class="lab-titlebar">
+        <span class="lab-title"><span class="terminal-dots"><i></i><i></i><i></i></span>${escapeHtml(title)}</span>
+        <span class="lab-badge">PLAYGROUND</span>
+      </div>
+      <p class="lab-mission"><strong>MISSION:</strong> ${mission}</p>
+      <div class="lab-grid">
+        <div class="lab-controls">${controls}</div>
+        <div class="lab-output"><span class="lab-output-label">live result</span><div class="lab-result"></div><div class="lab-log" aria-live="polite"></div></div>
+      </div>
+    </section>`;
+}
+
+function labRows(rows) {
+  return `<div class="lab-readout">${rows.map(([key, value, hot]) => `
+    <div class="lab-row"><span class="lab-key">${escapeHtml(key)}</span><span class="lab-value ${hot ? "hot" : ""}">${escapeHtml(String(value))}</span></div>`).join("")}</div>`;
+}
+
+function mountPltResolverLab(host) {
+  host.innerHTML = labShell(
+    "PLT/GOT RESOLVER LAB",
+    "Switch binding modes, restart the process, and predict whether the next call enters the loader.",
+    `<div class="lab-control"><label class="lab-control-label" for="lab-binding">Binding mode</label><select id="lab-binding" class="lab-select"><option value="lazy">lazy · resolve on first call</option><option value="now">immediate · resolve at startup</option></select></div>
+     <div class="lab-actions"><button class="lab-button primary lab-call" type="button">call puts()</button><button class="lab-button lab-restart" type="button">restart process</button></div>`
+  );
+  const mode = host.querySelector(".lab-select");
+  const result = host.querySelector(".lab-result");
+  const log = host.querySelector(".lab-log");
+  let calls = 0;
+  let resolverRuns = 0;
+  let got = "";
+
+  function restart() {
+    calls = 0;
+    resolverRuns = mode.value === "now" ? 1 : 0;
+    got = mode.value === "now" ? "0x7ffff7e41980 → libc puts" : "0x401036 → PLT+6 resolver path";
+    log.textContent = mode.value === "now"
+      ? "startup: ld.so resolved puts and patched GOT before main()"
+      : "startup: GOT points back into PLT; loader has not resolved puts";
+    render();
+  }
+
+  function render(hot = "") {
+    result.innerHTML = labRows([
+      ["PLT address", "0x401030 · R-X code", hot === "plt"],
+      ["PLT bytes", "ff 25 ca 2f 00 00 …", false],
+      ["GOT slot", "0x404000 · 8-byte data", false],
+      ["GOT value", got, hot === "got"],
+      ["puts calls", calls, hot === "call"],
+      ["resolver runs", resolverRuns, hot === "resolver"]
+    ]);
+  }
+
+  host.querySelector(".lab-call").addEventListener("click", () => {
+    calls += 1;
+    if (got.startsWith("0x401036")) {
+      resolverRuns += 1;
+      got = "0x7ffff7e41980 → libc puts";
+      log.textContent = `call ${calls}: PLT read unresolved GOT → loader ran → GOT data changed → puts ran`;
+      render("got");
+    } else {
+      log.textContent = `call ${calls}: PLT read resolved GOT → jumped directly to libc puts`;
+      render("call");
+    }
+  });
+  host.querySelector(".lab-restart").addEventListener("click", restart);
+  mode.addEventListener("change", restart);
+  restart();
+}
+
+function mountFdTableLab(host) {
+  host.innerHTML = labShell(
+    "FILE DESCRIPTOR TABLE LAB",
+    "Create aliases to one open file, change the read size, and discover which state is shared.",
+    `<div class="lab-control"><label class="lab-control-label">Selected descriptor</label><select class="lab-select lab-fd-select"></select></div>
+     <div class="lab-control"><label class="lab-control-label">Read size <span class="lab-control-value lab-read-size-label">32 bytes</span></label><input class="lab-range lab-read-size" type="range" min="1" max="256" value="32" /></div>
+     <div class="lab-actions"><button class="lab-button primary lab-open" type="button">open file</button><button class="lab-button lab-dup" type="button">dup selected</button><button class="lab-button lab-read" type="button">read</button><button class="lab-button lab-close" type="button">close</button><button class="lab-button lab-reset" type="button">reset</button></div>`
+  );
+  const select = host.querySelector(".lab-fd-select");
+  const size = host.querySelector(".lab-read-size");
+  const sizeLabel = host.querySelector(".lab-read-size-label");
+  const result = host.querySelector(".lab-result");
+  const log = host.querySelector(".lab-log");
+  let table = new Map();
+  let descriptions = new Map();
+  let nextDescription = 0;
+
+  const nextFd = () => {
+    let fd = 3;
+    while (table.has(fd)) fd += 1;
+    return fd;
+  };
+  const selectedFd = () => Number(select.value);
+
+  function render(message = "Choose open file to begin.") {
+    const previous = select.value;
+    const descriptors = [...table.keys()].sort((a, b) => a - b);
+    select.innerHTML = descriptors.length
+      ? descriptors.map((fd) => `<option value="${fd}">fd ${fd}</option>`).join("")
+      : `<option value="">no open descriptors</option>`;
+    if (descriptors.includes(Number(previous))) select.value = previous;
+    const slots = [0, 1, 2, ...descriptors].map((fd) => {
+      if (fd < 3) return `<div class="lab-object"><span>fd ${fd}</span><span>terminal ${["stdin", "stdout", "stderr"][fd]}</span><span>reserved</span></div>`;
+      const id = table.get(fd);
+      return `<div class="lab-object"><span>fd ${fd}</span><span>pointer → open description ${id}</span><span>handle</span></div>`;
+    }).join("");
+    const objects = [...descriptions.entries()].map(([id, item]) => `<div class="lab-object winner"><span>object ${id}</span><span>offset ${item.offset} · refs ${item.refs}</span><span>kernel</span></div>`).join("");
+    result.innerHTML = `<span class="lab-output-label">per-process descriptor slots</span><div class="lab-object-list">${slots}</div><span class="lab-output-label" style="margin-top:14px">open file descriptions</span><div class="lab-object-list">${objects || '<div class="lab-object"><span>—</span><span>none</span><span>kernel</span></div>'}</div>`;
+    log.textContent = message;
+    const disabled = descriptors.length === 0;
+    host.querySelector(".lab-dup").disabled = disabled;
+    host.querySelector(".lab-read").disabled = disabled;
+    host.querySelector(".lab-close").disabled = disabled;
+  }
+
+  host.querySelector(".lab-open").addEventListener("click", () => {
+    const fd = nextFd();
+    const id = String.fromCharCode(65 + nextDescription++);
+    table.set(fd, id);
+    descriptions.set(id, { offset: 0, refs: 1 });
+    render(`open: kernel created object ${id}; table[${fd}] now points to it; C received integer ${fd}`);
+    select.value = String(fd);
+  });
+  host.querySelector(".lab-dup").addEventListener("click", () => {
+    const source = selectedFd();
+    const id = table.get(source);
+    const fd = nextFd();
+    table.set(fd, id);
+    descriptions.get(id).refs += 1;
+    render(`dup(${source}): table[${fd}] received the same pointer to ${id}; no new file offset was created`);
+    select.value = String(fd);
+  });
+  host.querySelector(".lab-read").addEventListener("click", () => {
+    const fd = selectedFd();
+    const id = table.get(fd);
+    const item = descriptions.get(id);
+    const count = Number(size.value);
+    const start = item.offset;
+    item.offset += count;
+    render(`read(${fd}, …, ${count}): object ${id} supplied bytes ${start}–${item.offset - 1}; shared offset is now ${item.offset}`);
+    select.value = String(fd);
+  });
+  host.querySelector(".lab-close").addEventListener("click", () => {
+    const fd = selectedFd();
+    const id = table.get(fd);
+    table.delete(fd);
+    const item = descriptions.get(id);
+    item.refs -= 1;
+    if (item.refs === 0) descriptions.delete(id);
+    render(item.refs === 0 ? `close(${fd}): last reference removed; kernel destroyed object ${id}` : `close(${fd}): slot cleared; object ${id} remains alive with ${item.refs} reference(s)`);
+  });
+  host.querySelector(".lab-reset").addEventListener("click", () => {
+    table = new Map();
+    descriptions = new Map();
+    nextDescription = 0;
+    render("reset: descriptor slots 3 and above are empty");
+  });
+  size.addEventListener("input", () => { sizeLabel.textContent = `${size.value} bytes`; });
+  render();
+}
+
+function mountPageDecoderLab(host) {
+  host.innerHTML = labShell(
+    "VIRTUAL ADDRESS DECODER",
+    "Move an address across page boundaries, then change mapping state and predict whether access succeeds.",
+    `<div class="lab-control"><label class="lab-control-label">Virtual address <span class="lab-control-value lab-address-label"></span></label><input class="lab-range lab-address" type="range" min="0" max="1048575" step="1" value="21450" /></div>
+     <div class="lab-control"><label class="lab-control-label">Page size</label><select class="lab-select lab-page-size"><option value="4096">4 KiB</option><option value="16384">16 KiB</option><option value="65536">64 KiB</option></select></div>
+     <div class="lab-control"><label class="lab-control-label">Page-table entry</label><select class="lab-select lab-present"><option value="present">present → physical frame 42</option><option value="missing">not present</option></select></div>
+     <div class="lab-control"><label class="lab-control-label">Attempt</label><select class="lab-select lab-access"><option value="read">read</option><option value="write">write</option></select></div>
+     <div class="lab-control"><label class="lab-control-label">Permission</label><select class="lab-select lab-permission"><option value="read">R--</option><option value="write">RW-</option></select></div>
+     <div class="lab-actions"><button class="lab-button primary lab-translate" type="button">translate + access</button></div>`
+  );
+  const address = host.querySelector(".lab-address");
+  const addressLabel = host.querySelector(".lab-address-label");
+  const pageSize = host.querySelector(".lab-page-size");
+  const present = host.querySelector(".lab-present");
+  const access = host.querySelector(".lab-access");
+  const permission = host.querySelector(".lab-permission");
+  const result = host.querySelector(".lab-result");
+  const log = host.querySelector(".lab-log");
+
+  function render(runAccess = false) {
+    const virtual = Number(address.value);
+    const size = Number(pageSize.value);
+    const offsetBits = Math.log2(size);
+    const page = Math.floor(virtual / size);
+    const offset = virtual % size;
+    const physical = 42 * size + offset;
+    addressLabel.textContent = `0x${virtual.toString(16).padStart(5, "0")}`;
+    const bits = virtual.toString(2).padStart(20, "0").split("").map((bit, index) => `<span class="lab-bit ${index >= 20 - offsetBits ? "offset" : ""}">${bit}</span>`).join("");
+    result.innerHTML = `${labRows([
+      ["virtual", `0x${virtual.toString(16).padStart(5, "0")}`],
+      ["virtual page", page, true],
+      ["page offset", `0x${offset.toString(16)} · ${offset}`, true],
+      ["PTE", present.value === "present" ? "frame 42 · " + (permission.value === "write" ? "RW-" : "R--") : "not present"],
+      ["physical", present.value === "present" ? `0x${physical.toString(16)}` : "unknown until fault resolves"]
+    ])}<span class="lab-output-label" style="margin-top:12px">20-bit teaching address · green bits are offset</span><div class="lab-bits">${bits}</div>`;
+    if (!runAccess) {
+      log.textContent = `address ÷ page size = page ${page}, remainder ${offset}; the remainder becomes the within-page offset`;
+    } else if (present.value === "missing") {
+      log.textContent = `${access.value}: page-table entry is absent → CPU raises page fault → kernel must map/load a frame or send a signal`;
+    } else if (access.value === "write" && permission.value !== "write") {
+      log.textContent = "write: translation exists but page is R-- → protection fault → typically SIGSEGV";
+    } else {
+      log.textContent = `${access.value}: page ${page} → frame 42; preserve offset 0x${offset.toString(16)} → physical address 0x${physical.toString(16)}`;
+    }
+  }
+
+  [address, pageSize, present, access, permission].forEach((control) => control.addEventListener("input", () => render(false)));
+  host.querySelector(".lab-translate").addEventListener("click", () => render(true));
+  render(false);
+}
+
+function mountStackBudgetLab(host) {
+  host.innerHTML = labShell(
+    "THREAD STACK BUDGET",
+    "Keep total reserved stack address space below 1 GiB while giving each worker enough room.",
+    `<div class="lab-control"><label class="lab-control-label">Initial RLIMIT_STACK <span class="lab-control-value lab-main-label"></span></label><input class="lab-range lab-main-stack" type="range" min="1" max="64" value="8" /></div>
+     <div class="lab-control"><label class="lab-control-label">Worker threads <span class="lab-control-value lab-thread-label"></span></label><input class="lab-range lab-thread-count" type="range" min="1" max="256" value="32" /></div>
+     <div class="lab-control"><label class="lab-control-label">Stack source</label><select class="lab-select lab-stack-source"><option value="default">NPTL default from initial limit</option><option value="explicit">explicit pthread_attr size</option></select></div>
+     <div class="lab-control lab-explicit-control"><label class="lab-control-label">Explicit worker stack <span class="lab-control-value lab-worker-label"></span></label><input class="lab-range lab-worker-stack" type="range" min="0.25" max="16" step="0.25" value="2" /></div>
+     <div class="lab-control"><label class="lab-control-label">Pages actually touched <span class="lab-control-value lab-touch-label"></span></label><input class="lab-range lab-touch" type="range" min="1" max="100" value="10" /></div>`
+  );
+  const main = host.querySelector(".lab-main-stack");
+  const threads = host.querySelector(".lab-thread-count");
+  const source = host.querySelector(".lab-stack-source");
+  const worker = host.querySelector(".lab-worker-stack");
+  const touch = host.querySelector(".lab-touch");
+  const result = host.querySelector(".lab-result");
+  const log = host.querySelector(".lab-log");
+
+  function render() {
+    const mainMb = Number(main.value);
+    const count = Number(threads.value);
+    const workerMb = source.value === "default" ? mainMb : Number(worker.value);
+    const touched = Number(touch.value);
+    const reserved = mainMb + count * workerMb;
+    const residentEstimate = reserved * touched / 100;
+    host.querySelector(".lab-main-label").textContent = `${mainMb} MiB`;
+    host.querySelector(".lab-thread-label").textContent = String(count);
+    host.querySelector(".lab-worker-label").textContent = `${Number(worker.value).toFixed(2)} MiB`;
+    host.querySelector(".lab-touch-label").textContent = `${touched}%`;
+    host.querySelector(".lab-explicit-control").style.opacity = source.value === "explicit" ? "1" : "0.45";
+    result.innerHTML = `${labRows([
+      ["main mapping", `${mainMb} MiB`],
+      ["each worker", `${workerMb.toFixed(2)} MiB`],
+      ["worker mappings", `${count} × ${workerMb.toFixed(2)} MiB`],
+      ["virtual reserved", `${reserved.toFixed(2)} MiB`, true],
+      ["rough resident", `${residentEstimate.toFixed(2)} MiB at ${touched}% touched`]
+    ])}<div class="lab-meter"><span class="${reserved > 2048 ? "danger" : reserved > 1024 ? "warning" : ""}" style="width:${Math.min(100, reserved / 2048 * 100)}%"></span></div><span class="lab-output-label" style="margin-top:6px">meter scale · 0 to 2 GiB reserved</span>`;
+    log.textContent = reserved <= 1024
+      ? `within mission budget: ${reserved.toFixed(2)} MiB ≤ 1024 MiB. Reserved virtual space is not the same as resident RAM.`
+      : `budget exceeded by ${(reserved - 1024).toFixed(2)} MiB. Try fewer threads or a smaller explicit worker stack.`;
+  }
+
+  [main, threads, source, worker, touch].forEach((control) => control.addEventListener("input", render));
+  render();
+}
+
+function mountSymbolScopeLab(host) {
+  host.innerHTML = labShell(
+    "SYMBOL LOOKUP SCOPE",
+    "Reorder loaded objects, choose a symbol, and predict which definition the loader finds first.",
+    `<div class="lab-control"><label class="lab-control-label">Symbol to resolve</label><select class="lab-select lab-symbol"><option>connect</option><option>malloc</option><option>puts</option><option>foo</option><option>SSL_read</option></select></div>
+     <div class="lab-control"><label class="lab-control-label">Lookup rule</label><select class="lab-select lab-lookup"><option value="default">RTLD_DEFAULT · begin at scope start</option><option value="next">RTLD_NEXT · begin after libshim</option></select></div>
+     <p class="lab-control-label">Use ↑ and ↓ to change lookup order</p><div class="lab-object-list lab-scope-editor"></div>`
+  );
+  const symbol = host.querySelector(".lab-symbol");
+  const lookup = host.querySelector(".lab-lookup");
+  const editor = host.querySelector(".lab-scope-editor");
+  const result = host.querySelector(".lab-result");
+  const log = host.querySelector(".lab-log");
+  let objects = [
+    { name: "app", symbols: ["foo"] },
+    { name: "libshim.so", symbols: ["connect", "puts"] },
+    { name: "libssl.so.3", symbols: ["SSL_read"] },
+    { name: "libc.so.6", symbols: ["connect", "malloc", "puts"] }
+  ];
+
+  function render() {
+    const target = symbol.value;
+    const shimIndex = objects.findIndex((object) => object.name === "libshim.so");
+    const start = lookup.value === "next" ? shimIndex + 1 : 0;
+    const winnerIndex = objects.findIndex((object, index) => index >= start && object.symbols.includes(target));
+    editor.innerHTML = objects.map((object, index) => `
+      <div class="lab-object ${index === winnerIndex ? "winner" : ""}">
+        <span>${index}</span><span>${escapeHtml(object.name)}</span>
+        <span class="lab-actions"><button class="lab-mini-button" data-move="up" data-index="${index}" ${index === 0 ? "disabled" : ""} aria-label="Move ${escapeHtml(object.name)} earlier">↑</button><button class="lab-mini-button" data-move="down" data-index="${index}" ${index === objects.length - 1 ? "disabled" : ""} aria-label="Move ${escapeHtml(object.name)} later">↓</button></span>
+      </div>`).join("");
+    result.innerHTML = `<span class="lab-output-label">search begins at index ${start}</span><div class="lab-object-list">${objects.map((object, index) => `
+      <div class="lab-object ${index === winnerIndex ? "winner" : ""}"><span>${index < start ? "skip" : index === winnerIndex ? "win" : "scan"}</span><span>${escapeHtml(object.name)}</span><span>${escapeHtml(object.symbols.join(", "))}</span></div>`).join("")}</div>`;
+    log.textContent = winnerIndex === -1
+      ? `${target}: no definition exists in the searched portion of this scope`
+      : `${target}: first matching definition is ${objects[winnerIndex].name} at scope index ${winnerIndex}`;
+  }
+
+  editor.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-move]");
+    if (!button) return;
+    const index = Number(button.dataset.index);
+    const other = button.dataset.move === "up" ? index - 1 : index + 1;
+    [objects[index], objects[other]] = [objects[other], objects[index]];
+    render();
+  });
+  symbol.addEventListener("change", render);
+  lookup.addEventListener("change", render);
+  render();
+}
+
+const labMounts = {
+  "plt-resolver": mountPltResolverLab,
+  "fd-table": mountFdTableLab,
+  "page-decoder": mountPageDecoderLab,
+  "stack-budget": mountStackBudgetLab,
+  "symbol-scope": mountSymbolScopeLab
+};
+
+function mountLabs() {
+  article.querySelectorAll("[data-lab]").forEach((host) => {
+    const mount = labMounts[host.dataset.lab];
+    if (mount) mount(host);
+  });
+}
+
 function renderToc(query = "") {
   const normalized = query.trim().toLowerCase();
   const html = groups.map((group) => {
@@ -1732,6 +2063,7 @@ function renderArticle(slug, pushFocus = false) {
     </div>`;
 
   mountTimelines();
+  mountLabs();
   mountAmbientAnimations();
 
   document.title = `${entry.title} · Linux Systems Field Guide`;
