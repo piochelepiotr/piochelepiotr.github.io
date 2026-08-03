@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="A connected field guide to Linux systems programming concepts."
+    />
+    <title>Linux Systems Field Guide</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#article">Skip to article</a>
+
+    <div class="site-shell">
+      <aside class="sidebar" id="sidebar" aria-label="Guide navigation">
+        <header class="brand">
+          <a href="#readme" data-route="readme" aria-label="Linux Systems Field Guide home">
+            <span class="brand-mark" aria-hidden="true">_</span>
+            <span>
+              <strong>Linux Systems</strong>
+              <small>Field Guide</small>
+            </span>
+          </a>
+          <button class="sidebar-close" id="sidebar-close" aria-label="Close navigation">×</button>
+        </header>
+
+        <div class="search-wrap">
+          <label class="sr-only" for="search">Search concepts</label>
+          <svg aria-hidden="true" viewBox="0 0 20 20">
+            <circle cx="8.5" cy="8.5" r="5.5"></circle>
+            <path d="m13 13 4 4"></path>
+          </svg>
+          <input id="search" type="search" placeholder="Search concepts…" autocomplete="off" />
+          <kbd>/</kbd>
+        </div>
+
+        <nav id="toc" class="toc" aria-label="Table of contents"></nav>
+
+        <footer class="sidebar-footer">
+          <div class="progress-meta">
+            <span>Reading progress</span>
+            <span id="progress-label">0 / 0</span>
+          </div>
+          <div class="progress-track" aria-hidden="true">
+            <span id="progress-bar"></span>
+          </div>
+          <button id="reset-progress" class="text-button">Reset progress</button>
+        </footer>
+      </aside>
+
+      <div class="backdrop" id="backdrop"></div>
+
+      <main class="main">
+        <header class="topbar">
+          <button class="menu-button" id="menu-button" aria-label="Open navigation">
+            <span></span><span></span><span></span>
+          </button>
+          <a class="topbar-title" href="#readme" data-route="readme">Linux Systems Field Guide</a>
+          <div class="topbar-actions">
+            <button id="theme-toggle" class="icon-button" aria-label="Toggle color theme">
+              <span class="theme-icon" aria-hidden="true">◐</span>
+            </button>
+          </div>
+        </header>
+
+        <article id="article" class="article" tabindex="-1" aria-live="polite"></article>
+
+        <footer class="site-footer">
+          <span>Built for reading in order—and getting pleasantly lost.</span>
+          <a href="#readme" data-route="readme">Back to start ↑</a>
+        </footer>
+      </main>
+    </div>
+
+    <noscript>
+      <div class="noscript">This guide needs JavaScript to render its linked concept pages.</div>
+    </noscript>
+    <script src="app.js"></script>
+  </body>
+</html>
