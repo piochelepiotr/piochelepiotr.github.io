@@ -11,8 +11,8 @@ const callout = (title, body, kind = "") => `
 const practiceNote = (body) => `
   <aside class="practice-note"><span class="label">In practice</span><p>${body}</p></aside>`;
 const diagram = (...nodes) => `
-  <div class="diagram"><div class="diagram-row">${nodes
-    .map((node, index) => `${index ? '<span class="diagram-arrow">→</span>' : ""}<span class="diagram-node ${node.accent ? "accent" : ""}">${node.text}</span>`)
+  <div class="diagram flow-diagram" style="--flow-count:${nodes.length}"><div class="diagram-row">${nodes
+    .map((node, index) => `${index ? `<span class="diagram-arrow" style="--flow-index:${index - 0.5}">→</span>` : ""}<span class="diagram-node ${node.accent ? "accent" : ""}" style="--flow-index:${index}">${node.text}</span>`)
     .join("")}</div></div>`;
 
 const groups = [
@@ -1042,6 +1042,8 @@ if (error != NULL) {
           <p>Let’s follow one real-looking x86-64 call to <code>puts()</code>. The exact addresses vary in every binary, but the instructions and state changes below are representative of a lazily bound ELF executable.</p>
           <div class="timeline-demo" data-timeline="plt"></div>
 
+          ${callout("PLT code versus GOT data", `The PLT does not have one mutable pointer value. It is machine code stored around <code>0x401030</code> in an executable R-X mapping. Its “value” is its instruction bytes. The GOT slot is separate data at <code>0x404000</code>; those eight bytes store one pointer and are what the loader edits.`)}
+
           <h2>The three pieces</h2>
           <div class="terminal-figure">
             <div class="terminal-titlebar"><span class="terminal-dots"><i></i><i></i><i></i></span>process image · three different locations</div>
@@ -1323,9 +1325,24 @@ gdb --args ./program`)}
 
 const timelineDefinitions = {};
 
+function pltMachineState({ rip, rsp, stack, got, loader = "idle", changed = [] }) {
+  const isChanged = (name) => changed.includes(name);
+  return [
+    ["RIP", rip, isChanged("rip"), "CPU REGISTERS"],
+    ["RSP", rsp, isChanged("rsp"), "CPU REGISTERS"],
+    ["entry address", "0x401030", false, "CODE MEMORY · .plt · R-X"],
+    ["16 code bytes", "ff 25 ca 2f 00 00 · 68 00 00 00 00 · e9 e0 ff ff ff", isChanged("plt"), "CODE MEMORY · .plt · R-X"],
+    ["stack top", stack, isChanged("stack"), "STACK MEMORY · RW"],
+    ["slot address", "0x404000", isChanged("gotAddress"), "DATA MEMORY · .got.plt · RW BEFORE RELRO"],
+    ["8-byte value", got, isChanged("got"), "DATA MEMORY · .got.plt · RW BEFORE RELRO"],
+    ["lookup", loader, isChanged("loader"), "DYNAMIC LOADER STATE"]
+  ];
+}
+
 timelineDefinitions.plt = {
   title: "LIVE TRACE · LAZY PLT/GOT RESOLUTION",
   programLabel: "x86-64 instructions / loader actions",
+  stateLabel: "CPU + code memory + data memory + loader",
   path: ["caller", "PLT", "GOT", "loader", "libc", "caller"],
   lines: [
     ["0x401146", "call 0x401030 &lt;puts@plt&gt;"],
@@ -1338,20 +1355,21 @@ timelineDefinitions.plt = {
     ["0x40114b", "next caller instruction"]
   ],
   frames: [
-    { active: 0, path: 0, title: "About to call", text: "RIP points at call. The GOT still points back into the PLT resolver path.", state: [["RIP", "0x401146"], ["RSP", "0x7fff…fee8"], ["stack top", "caller data"], ["GOT[puts]", "0x401036 → PLT+6"]] },
-    { active: 1, path: 1, title: "call transfers control", text: "call pushes its return address, then sets RIP to the puts PLT entry.", state: [["RIP", "0x401030", true], ["RSP", "0x7fff…fee0", true], ["stack top", "0x40114b", true], ["GOT[puts]", "0x401036 → PLT+6"]] },
-    { active: 2, path: 2, title: "indirect jump reads the GOT", text: "The PLT jump reads eight bytes at 0x404000. They contain 0x401036, so RIP goes there.", state: [["RIP", "0x401036", true], ["RSP", "0x7fff…fee0"], ["read address", "0x404000", true], ["GOT[puts]", "0x401036 → PLT+6"]] },
-    { active: 3, path: 1, title: "identify the relocation", text: "push $0 records relocation slot 0. PLT0 then enters the dynamic loader.", state: [["RIP", "0x40103b", true], ["RSP", "0x7fff…fed8", true], ["stack top", "relocation #0", true], ["GOT[puts]", "0x401036 → PLT+6"]] },
-    { active: 4, path: 3, title: "loader searches symbols", text: "The resolver follows relocation #0 to the name puts, then searches the loaded-object lookup scope.", state: [["RIP", "ld.so resolver", true], ["symbol", "puts", true], ["found in", "libc.so.6", true], ["GOT[puts]", "0x401036 → PLT+6"]] },
-    { active: 5, path: 3, title: "the mutation", text: "The loader overwrites the GOT slot. This is the single memory edit that makes later calls fast.", state: [["RIP", "ld.so resolver"], ["write address", "0x404000", true], ["old 8 bytes", "36 10 40 00 00 00 00 00"], ["GOT[puts]", "0x7ffff7e41980 → libc", true]] },
-    { active: 6, path: 4, title: "real puts runs", text: "The loader transfers control to the newly resolved address inside libc.", state: [["RIP", "0x7ffff7e41980", true], ["RSP", "0x7fff…fed8"], ["stack return", "0x40114b"], ["GOT[puts]", "0x7ffff7e41980 → libc"]] },
-    { active: 7, path: 5, title: "return to the caller", text: "puts returns to the address saved by the original call. The next call will skip frames 2–5.", state: [["RIP", "0x40114b", true], ["RSP", "0x7fff…fee8", true], ["result", "puts completed"], ["GOT[puts]", "0x7ffff7e41980 → libc"]] }
+    { active: 0, path: 0, title: "About to call", text: "RIP points at call. The GOT data slot still contains a pointer back into the PLT code.", state: pltMachineState({ rip: "0x401146 · caller code", rsp: "0x7fff…fee8", stack: "caller data", got: "0x401036 → PLT+6" }) },
+    { active: 1, path: 1, title: "call transfers control", text: "call pushes its return address, then sets RIP to the PLT code address 0x401030.", state: pltMachineState({ rip: "0x401030 · PLT code", rsp: "0x7fff…fee0", stack: "0x40114b · return address", got: "0x401036 → PLT+6", changed: ["rip", "rsp", "stack", "plt"] }) },
+    { active: 2, path: 2, title: "indirect jump reads GOT data", text: "The PLT instruction reads the eight-byte data slot at 0x404000. Its stored pointer is 0x401036, so RIP goes there.", state: pltMachineState({ rip: "0x401036 · PLT+6 code", rsp: "0x7fff…fee0", stack: "0x40114b · return address", got: "0x401036 → PLT+6", changed: ["rip", "gotAddress", "got"] }) },
+    { active: 3, path: 1, title: "identify the relocation", text: "PLT code pushes relocation index 0 onto stack memory, then enters PLT0.", state: pltMachineState({ rip: "0x40103b · PLT code", rsp: "0x7fff…fed8", stack: "relocation #0", got: "0x401036 → PLT+6", changed: ["rip", "rsp", "stack", "plt"] }) },
+    { active: 4, path: 3, title: "loader searches symbols", text: "The resolver follows relocation #0 to the name puts, then searches loaded objects. The PLT code and GOT data have not changed yet.", state: pltMachineState({ rip: "ld.so resolver code", rsp: "0x7fff…fed8", stack: "relocation #0", got: "0x401036 → PLT+6", loader: "puts → found in libc.so.6", changed: ["rip", "loader"] }) },
+    { active: 5, path: 3, title: "the GOT data mutation", text: "The loader writes a new eight-byte pointer into data address 0x404000. PLT machine-code bytes remain unchanged.", state: pltMachineState({ rip: "ld.so resolver code", rsp: "0x7fff…fed8", stack: "relocation #0", got: "0x7ffff7e41980 → libc puts", loader: "resolved · patch complete", changed: ["gotAddress", "got", "loader"] }) },
+    { active: 6, path: 4, title: "real puts runs", text: "The loader transfers control to the address now stored in the GOT. The CPU is executing libc code, not PLT code.", state: pltMachineState({ rip: "0x7ffff7e41980 · libc code", rsp: "0x7fff…fed8", stack: "0x40114b · return address", got: "0x7ffff7e41980 → libc puts", loader: "idle", changed: ["rip"] }) },
+    { active: 7, path: 5, title: "return to the caller", text: "puts returns to the saved caller address. On the next call, PLT code reads the already-patched GOT data and jumps straight to libc.", state: pltMachineState({ rip: "0x40114b · caller code", rsp: "0x7fff…fee8", stack: "caller data", got: "0x7ffff7e41980 → libc puts", loader: "idle", changed: ["rip", "rsp", "stack"] }) }
   ]
 };
 
 timelineDefinitions.fd = {
   title: "LIVE STATE · FILE DESCRIPTOR LIFETIME",
   programLabel: "C operations",
+  stateLabel: "userspace handles + kernel open state",
   path: ["C integer", "fd table", "struct file", "file bytes"],
   lines: [
     ["1", "fd3 = open(\"notes.txt\", O_RDONLY)"],
@@ -1375,6 +1393,7 @@ timelineDefinitions.fd = {
 timelineDefinitions.syscall = {
   title: "LIVE TRACE · READ SYSCALL",
   programLabel: "x86-64 boundary crossing",
+  stateLabel: "registers + privilege + error state",
   path: ["C caller", "libc", "CPU gate", "kernel", "libc", "C caller"],
   lines: [
     ["user", "read(3, buffer, 100)"],
@@ -1481,7 +1500,7 @@ function timelineMarkup(definition) {
           </div>
         </div>
         <div class="timeline-state">
-          <span class="timeline-panel-label">live state</span>
+          <span class="timeline-panel-label">${escapeHtml(definition.stateLabel || "live state")}</span>
           <div class="timeline-state-grid"></div>
           <div class="timeline-explanation"></div>
           <span class="timeline-live" aria-live="polite"></span>
@@ -1524,11 +1543,18 @@ function mountTimeline(host, definition) {
     });
     pathNodes.forEach((node, index) => node.classList.toggle("active", index === frame.path));
     pathEdges.forEach((edge, index) => edge.classList.toggle("active", index < frame.path));
-    stateGrid.innerHTML = frame.state.map(([key, value, changed]) => `
-      <div class="timeline-state-row ${changed ? "changed" : ""}">
-        <span class="timeline-state-key">${escapeHtml(key)}</span>
-        <span class="timeline-state-value">${escapeHtml(value)}</span>
-      </div>`).join("");
+    let currentSection = "";
+    stateGrid.innerHTML = frame.state.map(([key, value, changed, section]) => {
+      const sectionHeader = section && section !== currentSection
+        ? `<div class="timeline-state-section">${escapeHtml(section)}</div>`
+        : "";
+      if (section) currentSection = section;
+      return `${sectionHeader}
+        <div class="timeline-state-row ${changed ? "changed" : ""}">
+          <span class="timeline-state-key">${escapeHtml(key)}</span>
+          <span class="timeline-state-value">${escapeHtml(value)}</span>
+        </div>`;
+    }).join("");
     explanation.innerHTML = `<strong>${escapeHtml(frame.title)}</strong>${escapeHtml(frame.text)}`;
     range.value = String(frameIndex);
     counter.textContent = `${frameIndex + 1} / ${definition.frames.length}`;
@@ -1615,6 +1641,34 @@ function mountTimelines() {
   });
 }
 
+function mountAmbientAnimations() {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const targets = [...article.querySelectorAll(".flow-diagram, .step-trace, .memory-table, .layer-stack")];
+  targets.forEach((target) => {
+    const children = target.matches(".step-trace")
+      ? target.querySelectorAll(".trace-step")
+      : target.matches(".memory-table")
+        ? target.querySelectorAll(".memory-row")
+        : target.matches(".layer-stack")
+          ? target.querySelectorAll(".layer")
+          : [];
+    children.forEach((child, index) => child.style.setProperty("--reveal-index", index));
+  });
+  if (!("IntersectionObserver" in window)) {
+    targets.forEach((target) => target.classList.add("animate-in"));
+    return;
+  }
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      entry.target.classList.add("animate-in");
+      if (!entry.target.matches(".flow-diagram")) observer.unobserve(entry.target);
+    });
+  }, { threshold: 0.2 });
+  targets.forEach((target) => observer.observe(target));
+  timelineCleanups.push(() => observer.disconnect());
+}
+
 function renderToc(query = "") {
   const normalized = query.trim().toLowerCase();
   const html = groups.map((group) => {
@@ -1678,6 +1732,7 @@ function renderArticle(slug, pushFocus = false) {
     </div>`;
 
   mountTimelines();
+  mountAmbientAnimations();
 
   document.title = `${entry.title} · Linux Systems Field Guide`;
   renderToc(search.value);

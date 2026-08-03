@@ -596,6 +596,60 @@ code {
   font-family: "DM Mono", monospace;
 }
 
+.flow-diagram.animate-in .diagram-node {
+  animation: flow-node calc(var(--flow-count) * 1s) ease-in-out infinite;
+  animation-delay: calc(var(--flow-index) * 1s);
+}
+
+.flow-diagram.animate-in .diagram-arrow {
+  animation: flow-arrow calc(var(--flow-count) * 1s) ease-in-out infinite;
+  animation-delay: calc(var(--flow-index) * 1s);
+}
+
+@keyframes flow-node {
+  0%, 18% {
+    border-color: var(--accent);
+    color: var(--ink);
+    background: var(--accent-soft);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
+  }
+  28%, 100% {
+    border-color: var(--line);
+    color: var(--ink);
+    background: var(--paper);
+    box-shadow: none;
+  }
+}
+
+@keyframes flow-arrow {
+  0%, 25% {
+    color: var(--accent-ink);
+  }
+  35%, 100% {
+    color: var(--muted);
+  }
+}
+
+.step-trace.animate-in .trace-step,
+.memory-table.animate-in .memory-row,
+.layer-stack.animate-in .layer {
+  animation: terminal-reveal 650ms ease-out both;
+  animation-delay: calc(var(--reveal-index, 0) * 110ms);
+}
+
+@keyframes terminal-reveal {
+  0% {
+    opacity: 0.3;
+    transform: translateY(7px);
+    filter: brightness(1.45);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+    filter: brightness(1);
+  }
+}
+
 /* Concrete, terminal-style systems diagrams. */
 .terminal-figure {
   margin: 32px 0;
@@ -1033,6 +1087,20 @@ code {
   border-radius: 5px;
   overflow: hidden;
   background: #353a33;
+}
+
+.timeline-state-section {
+  padding: 7px 10px 6px;
+  color: #aab49e;
+  background: #171a16;
+  font: 500 8px/1.4 "DM Mono", monospace;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.timeline-state-section::before {
+  content: "▸ ";
+  color: var(--accent);
 }
 
 .timeline-state-row {
@@ -1488,5 +1556,6 @@ code {
   *::after {
     scroll-behavior: auto !important;
     transition: none !important;
+    animation: none !important;
   }
 }
