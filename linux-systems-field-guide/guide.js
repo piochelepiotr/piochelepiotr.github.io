@@ -186,6 +186,29 @@ objdump -drwC object.o`)}
             { text: "loadable bytes" },
             { text: "section headers" }
           )}
+          <div class="terminal-figure">
+            <div class="terminal-titlebar"><span class="terminal-dots"><i></i><i></i><i></i></span>example ELF file · bytes laid out on disk</div>
+            <div class="terminal-body">
+              <div class="memory-table">
+                <div class="memory-row header"><span class="memory-cell">file offset</span><span class="memory-cell">interpreted as</span><span class="memory-cell">who needs it</span></div>
+                <div class="memory-row"><span class="memory-cell">0x0000</span><span class="memory-cell">ELF header</span><span class="memory-cell">kernel/linker: architecture, entry point, table locations</span></div>
+                <div class="memory-row"><span class="memory-cell">0x0040</span><span class="memory-cell">program headers</span><span class="memory-cell">kernel/loader: which byte ranges become mappings</span></div>
+                <div class="memory-row"><span class="memory-cell">0x1000</span><span class="memory-cell">.text</span><span class="memory-cell">CPU instructions in an R-X mapping</span></div>
+                <div class="memory-row"><span class="memory-cell">0x3000</span><span class="memory-cell">.rodata</span><span class="memory-cell">constants in an R-- mapping</span></div>
+                <div class="memory-row"><span class="memory-cell">0x4000</span><span class="memory-cell">.data + .bss</span><span class="memory-cell">globals in RW- memory; .bss zeros need no file bytes</span></div>
+                <div class="memory-row"><span class="memory-cell">0x5000</span><span class="memory-cell">section headers</span><span class="memory-cell">linker/debugger: names and link-time organization</span></div>
+              </div>
+            </div>
+            <figcaption class="terminal-caption">Offsets are positions inside the file. Virtual addresses are positions inside the running process. A <code>PT_LOAD</code> header connects the two.</figcaption>
+          </div>
+          <div class="terminal-figure">
+            <div class="terminal-titlebar"><span class="terminal-dots"><i></i><i></i><i></i></span>one PT_LOAD mapping · file → virtual memory</div>
+            <div class="step-trace">
+              <div class="trace-step"><span class="trace-number">1</span><strong>read header</strong><p><code>p_offset=0x1000</code>, <code>p_vaddr=0x401000</code>, <code>p_filesz=0x900</code>, <code>p_memsz=0x900</code>, flags <code>R-X</code>.</p></div>
+              <div class="trace-step"><span class="trace-number">2</span><strong>create mapping</strong><p>File bytes at offset <code>0x1000</code> appear beginning at virtual address <code>0x401000</code>.</p></div>
+              <div class="trace-step"><span class="trace-number">3</span><strong>enforce access</strong><p>The CPU may fetch instructions and read data from these pages, but a write causes a protection fault.</p></div>
+            </div>
+          </div>
           <h2>Sections versus segments</h2>
           <p>Sections answer “what kind of link-time information is this?” Segments answer “which byte ranges should be mapped together, with which permissions?” Several sections may occupy one loadable segment.</p>
           <p>Important program-header types include <code>PT_LOAD</code>, <code>PT_DYNAMIC</code>, <code>PT_INTERP</code>, <code>PT_TLS</code>, and <code>PT_GNU_RELRO</code>. Their presence guides ${c("program-startup", "program startup")}, ${c("dynamic-loader", "dynamic linking")}, and ${c("thread-local-storage", "TLS initialization")}.</p>
@@ -334,6 +357,26 @@ readelf -l /proc/$PID/exe`)}
         summary: "Virtual memory separates address ranges from physical storage. Pages are populated, protected, shared, reclaimed, and faulted independently.",
         body: `
           <p>Creating a virtual mapping reserves an address range and defines how accesses should be handled. Physical pages can be attached lazily on first access. A page fault is the CPU asking the kernel to resolve an access—not automatically an application error.</p>
+          <div class="terminal-figure">
+            <div class="terminal-titlebar"><span class="terminal-dots"><i></i><i></i><i></i></span>load byte at virtual address 0x7f12_3456_078a</div>
+            <div class="step-trace">
+              <div class="trace-step"><span class="trace-number">1</span><strong>split address</strong><p>The CPU separates virtual page number <code>0x7f12_34560</code> from within-page offset <code>0x78a</code>.</p></div>
+              <div class="trace-step"><span class="trace-number">2</span><strong>translate page</strong><p>The MMU consults cached translation state and page tables: virtual page <code>0x7f12_34560</code> → physical frame <code>0x12ab9</code>, permissions <code>R--</code>.</p></div>
+              <div class="trace-step"><span class="trace-number">3</span><strong>form physical address</strong><p>Keep the same offset: physical frame base <code>0x12ab9000</code> + <code>0x78a</code> = <code>0x12ab978a</code>.</p></div>
+              <div class="trace-step"><span class="trace-number">4</span><strong>read cache / RAM</strong><p>The CPU fetches the byte. If the page-table entry were absent, it would enter the kernel’s page-fault handler instead.</p></div>
+            </div>
+            <figcaption class="terminal-caption">With a 4 KiB page, the low 12 address bits are the offset. Translation changes the page number, not the offset within the page.</figcaption>
+          </div>
+          <div class="terminal-figure">
+            <div class="terminal-titlebar"><span class="terminal-dots"><i></i><i></i><i></i></span>two virtual pages can refer to one physical frame</div>
+            <div class="terminal-body">
+              <div class="memory-table">
+                <div class="memory-row header"><span class="memory-cell">process</span><span class="memory-cell">virtual page</span><span class="memory-cell">physical backing</span></div>
+                <div class="memory-row"><span class="memory-cell">process A</span><span class="memory-cell">0x7f12_34560</span><span class="memory-cell">frame 0x12ab9 · shared libc code · R-X</span></div>
+                <div class="memory-row"><span class="memory-cell">process B</span><span class="memory-cell">0x7ea0_81120</span><span class="memory-cell">frame 0x12ab9 · same physical bytes · R-X</span></div>
+              </div>
+            </div>
+          </div>
           <h2>Minor, major, and invalid faults</h2>
           <ul>
             <li>A <strong>minor fault</strong> can be satisfied without reading storage, such as allocating a zero-filled anonymous page.</li>
@@ -382,6 +425,23 @@ if (p == MAP_FAILED) {
         summary: "Every thread has its own stack. The initial thread and pthread-created threads acquire their sizes through related but distinct mechanisms.",
         body: `
           <p>A stack holds call frames, saved registers, return addresses, and many automatic objects. It normally grows downward on common Linux architectures, but portable C does not promise that direction.</p>
+          <div class="terminal-figure">
+            <div class="terminal-titlebar"><span class="terminal-dots"><i></i><i></i><i></i></span>x86-64 example · main calls parse(42)</div>
+            <div class="terminal-body">
+              <div class="memory-table">
+                <div class="memory-row header"><span class="memory-cell">virtual address</span><span class="memory-cell">stack bytes mean</span><span class="memory-cell">who placed them</span></div>
+                <div class="memory-row"><span class="memory-cell">0x7fff…fef8</span><span class="memory-cell">0x000000000040117b</span><span class="memory-cell">return address pushed by <code>call parse</code></span></div>
+                <div class="memory-row"><span class="memory-cell">0x7fff…fef0</span><span class="memory-cell">old frame pointer</span><span class="memory-cell"><code>push %rbp</code> in parse prologue</span></div>
+                <div class="memory-row"><span class="memory-cell">0x7fff…feec</span><span class="memory-cell">local int result</span><span class="memory-cell">space reserved by <code>sub $0x20,%rsp</code></span></div>
+                <div class="memory-row"><span class="memory-cell">0x7fff…fed0</span><span class="memory-cell">padding / other locals</span><span class="memory-cell">compiler’s frame layout</span></div>
+              </div>
+              <div class="boundary-label">stack grows toward lower addresses ↓</div>
+              <div class="state-row"><span class="state-key">RSP</span><span class="state-value changed">0x7fff…fed0 — current stack top</span></div>
+              <div class="state-row"><span class="state-key">RBP</span><span class="state-value">0x7fff…fef0 — frame base, if frame pointers are enabled</span></div>
+              <div class="state-row"><span class="state-key">RDI</span><span class="state-value">42 — first integer argument is in a register, not necessarily on the stack</span></div>
+            </div>
+            <figcaption class="terminal-caption"><code>ret</code> pops the saved address <code>0x40117b</code> into RIP, so execution resumes immediately after the original <code>call</code>.</figcaption>
+          </div>
           <h2>The initial thread</h2>
           <p><code>RLIMIT_STACK</code> limits the main thread’s stack growth and also constrains argument and environment space for <code>execve()</code>. The shell’s <code>ulimit -s</code> commonly changes its soft limit.</p>
           <h2>New pthreads</h2>
@@ -463,9 +523,82 @@ prlimit --pid $PID`)}
         question: "Why are sockets, pipes, and files all integers?",
         summary: "A file descriptor indexes a process table entry referring to an open file description. Duplicated descriptors can share offset and status flags while retaining descriptor-local flags.",
         body: `
-          <p>Linux models many I/O resources through file descriptors: regular files, sockets, pipes, eventfds, epoll instances, and more. The integer is merely a handle; the kernel object carries state.</p>
+          <p>A file descriptor is just a small non-negative integer in your program—often <code>0</code>, <code>1</code>, <code>2</code>, or <code>3</code>. It is <strong>not a pointer</strong>, does not contain the file’s bytes, and does not contain a pathname. The kernel uses it as an array index.</p>
+
+          <h2>What is physically stored in the C variable?</h2>
+          <div class="terminal-figure">
+            <div class="terminal-titlebar"><span class="terminal-dots"><i></i><i></i><i></i></span>userspace · int fd = open("notes.txt", O_RDONLY)</div>
+            <div class="terminal-body">
+              <div class="state-row"><span class="state-key">open returned</span><span class="state-value changed">3</span></div>
+              <div class="state-row"><span class="state-key">C type</span><span class="state-value">int — commonly four bytes</span></div>
+              <div class="state-row"><span class="state-key">example bytes</span><span class="state-value"><span class="byte-strip"><span class="byte">03</span><span class="byte">00</span><span class="byte">00</span><span class="byte">00</span></span>little-endian representation of integer 3</span></div>
+              <div class="state-row"><span class="state-key">what it means</span><span class="state-value">“use slot 3 in this process’s kernel-managed descriptor table”</span></div>
+            </div>
+            <figcaption class="terminal-caption">The local variable may live in a register or in userspace memory. Either way, its useful content is only the number <code>3</code>.</figcaption>
+          </div>
+
+          <h2>What does the number lead to?</h2>
+          <div class="terminal-figure">
+            <div class="terminal-titlebar"><span class="terminal-dots"><i></i><i></i><i></i></span>conceptual lookup · read(3, buffer, 100)</div>
+            <div class="terminal-body">
+              <div class="layer-stack">
+                <div class="layer"><span class="layer-name">userspace</span><span class="layer-value"><code>fd = 3</code> — plain integer passed in syscall register <code>rdi</code></span></div>
+                <div class="boundary-label">syscall boundary</div>
+                <div class="layer"><span class="layer-name">process</span><span class="layer-value"><code>files → fdtable → fd[3]</code></span></div>
+                <div class="layer"><span class="layer-name">fd slot 3</span><span class="layer-value"><span class="pointer">pointer →</span> kernel <code>struct file</code> at an inaccessible kernel address</span></div>
+                <div class="layer"><span class="layer-name">open file</span><span class="layer-value">current offset, open flags, operations, path/inode or socket-specific state</span></div>
+                <div class="layer"><span class="layer-name">resource</span><span class="layer-value">regular file · socket · pipe · eventfd · device · epoll instance</span></div>
+              </div>
+            </div>
+            <figcaption class="terminal-caption">The exact kernel structures are implementation details. The stable model is: integer → per-process descriptor slot → open file description → underlying resource.</figcaption>
+          </div>
+
+          <h2>A concrete descriptor table</h2>
+          <div class="terminal-figure">
+            <div class="terminal-titlebar"><span class="terminal-dots"><i></i><i></i><i></i></span>process 4217 · kernel-owned fd table</div>
+            <div class="terminal-body">
+              <div class="memory-table">
+                <div class="memory-row header"><span class="memory-cell">index / fd</span><span class="memory-cell">slot contains</span><span class="memory-cell">open file description</span></div>
+                <div class="memory-row"><span class="memory-cell">0</span><span class="memory-cell">pointer 0xffff…a100</span><span class="memory-cell">terminal · read side · stdin</span></div>
+                <div class="memory-row"><span class="memory-cell">1</span><span class="memory-cell">pointer 0xffff…a180</span><span class="memory-cell">terminal · write side · stdout</span></div>
+                <div class="memory-row"><span class="memory-cell">2</span><span class="memory-cell">pointer 0xffff…a200</span><span class="memory-cell">terminal · write side · stderr</span></div>
+                <div class="memory-row"><span class="memory-cell">3</span><span class="memory-cell">pointer 0xffff…b740</span><span class="memory-cell">notes.txt · offset 0 · O_RDONLY</span></div>
+                <div class="memory-row"><span class="memory-cell">4</span><span class="memory-cell">NULL</span><span class="memory-cell">unused slot</span></div>
+              </div>
+            </div>
+            <figcaption class="terminal-caption">The shown kernel pointers are invented examples and cannot be dereferenced from userspace. <code>FD_CLOEXEC</code> is descriptor-local state commonly represented separately from the <code>struct file *</code> array.</figcaption>
+          </div>
+
+          <h2>What might the open file description remember?</h2>
+          <div class="terminal-figure">
+            <div class="terminal-titlebar"><span class="terminal-dots"><i></i><i></i><i></i></span>conceptual struct file · not a stable userspace layout</div>
+            <div class="terminal-body">
+              <div class="memory-table">
+                <div class="memory-row header"><span class="memory-cell">field concept</span><span class="memory-cell">example value</span><span class="memory-cell">meaning</span></div>
+                <div class="memory-row"><span class="memory-cell">file position</span><span class="memory-cell">128</span><span class="memory-cell">next regular-file read begins at byte 128</span></div>
+                <div class="memory-row"><span class="memory-cell">status flags</span><span class="memory-cell">O_RDONLY</span><span class="memory-cell">access mode and flags such as O_APPEND</span></div>
+                <div class="memory-row"><span class="memory-cell">operations</span><span class="memory-cell">pointer → file ops</span><span class="memory-cell">which kernel read/write/poll implementation to call</span></div>
+                <div class="memory-row"><span class="memory-cell">path / inode</span><span class="memory-cell">pointer → VFS objects</span><span class="memory-cell">which filesystem object this open instance refers to</span></div>
+                <div class="memory-row"><span class="memory-cell">reference count</span><span class="memory-cell">1</span><span class="memory-cell">how many references keep this open instance alive</span></div>
+                <div class="memory-row"><span class="memory-cell">private data</span><span class="memory-cell">type-specific pointer</span><span class="memory-cell">socket, device, or filesystem-specific state</span></div>
+              </div>
+            </div>
+          </div>
+
+          <p>Linux models many I/O resources through this mechanism: regular files, sockets, pipes, eventfds, epoll instances, and more. The integer is merely the userspace handle; kernel memory carries the state.</p>
           <h2>Descriptor versus open file description</h2>
-          <p><code>dup()</code> and <code>fork()</code> can create multiple descriptors referencing the same open file description, so they share the file offset and status flags. <code>FD_CLOEXEC</code> belongs to the descriptor and controls survival across <code>execve()</code>.</p>
+          <p><code>dup()</code> and <code>fork()</code> can create multiple descriptors referencing the same open file description, so they share the file offset and status flags. Here is why that changes observable behavior:</p>
+          <div class="terminal-figure">
+            <div class="terminal-titlebar"><span class="terminal-dots"><i></i><i></i><i></i></span>dup shares the open description</div>
+            <div class="step-trace">
+              <div class="trace-step"><span class="trace-number">1</span><strong><code>fd3 = open(...)</code></strong><p>Table slot 3 points to open description A. A’s file offset is <code>0</code>; reference count is <code>1</code>.</p></div>
+              <div class="trace-step"><span class="trace-number">2</span><strong><code>fd4 = dup(fd3)</code></strong><p>Kernel puts the same pointer in slot 4. Both <code>fd[3]</code> and <code>fd[4]</code> point to A; reference count becomes <code>2</code>.</p></div>
+              <div class="trace-step"><span class="trace-number">3</span><strong><code>read(fd3, b, 100)</code></strong><p>Kernel reads bytes 0–99 through A and changes A’s shared offset to <code>100</code>.</p></div>
+              <div class="trace-step"><span class="trace-number">4</span><strong><code>read(fd4, b, 20)</code></strong><p>This also uses A, so it starts at byte 100—not byte 0—and leaves the shared offset at <code>120</code>.</p></div>
+              <div class="trace-step"><span class="trace-number">5</span><strong><code>close(fd3)</code></strong><p>Slot 3 becomes empty and A’s reference count falls to 1. The file stays open through slot 4.</p></div>
+            </div>
+          </div>
+          <p><code>FD_CLOEXEC</code> belongs to the descriptor slot and controls survival across <code>execve()</code>; it is not a status flag shared through the open file description.</p>
           ${code("C · avoid the exec race", `int fd = open(path, O_RDONLY | O_CLOEXEC);
 int socket_fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);`)}
           <p>Setting close-on-exec atomically during creation avoids a race where another thread calls <code>fork()</code> plus <code>execve()</code> between creation and a later <code>fcntl()</code>.</p>
@@ -489,6 +622,28 @@ int socket_fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);`)}
         summary: "Threads share a process address space, code, heap, descriptors, and signal dispositions, while keeping their own registers, stack, scheduling state, errno, and signal mask.",
         body: `
           <p><code>pthread_create()</code> adds an execution stream to the process. Either thread may run first. Returning from the start routine terminates that thread; returning from <code>main()</code> behaves like <code>exit()</code> and terminates the process.</p>
+          <div class="terminal-figure">
+            <div class="terminal-titlebar"><span class="terminal-dots"><i></i><i></i><i></i></span>one process · three scheduled threads</div>
+            <div class="terminal-body">
+              <div class="state-split">
+                <section class="state-panel">
+                  <h3>Shared address space</h3>
+                  <div class="state-row"><span class="state-key">.text</span><span class="state-value">same machine instructions</span></div>
+                  <div class="state-row"><span class="state-key">globals</span><span class="state-value">same bytes and addresses</span></div>
+                  <div class="state-row"><span class="state-key">heap</span><span class="state-value">same allocations</span></div>
+                  <div class="state-row"><span class="state-key">fd table</span><span class="state-value">same descriptor slots</span></div>
+                </section>
+                <section class="state-panel">
+                  <h3>Thread A · B · C each own</h3>
+                  <div class="state-row"><span class="state-key">registers</span><span class="state-value">different RIP/RSP/general registers</span></div>
+                  <div class="state-row"><span class="state-key">stack</span><span class="state-value">different mapped range</span></div>
+                  <div class="state-row"><span class="state-key">TLS</span><span class="state-value">different object instances</span></div>
+                  <div class="state-row"><span class="state-key">signal mask</span><span class="state-value">different blocked set</span></div>
+                </section>
+              </div>
+            </div>
+            <figcaption class="terminal-caption">The scheduler pauses one thread by saving its registers and resumes another by restoring that thread’s registers. Switching threads does not switch the process address space.</figcaption>
+          </div>
           <div class="fact-grid">
             <div class="fact-card"><strong>Shared</strong><p>Virtual memory, globals, heap, file descriptors, current directory, signal dispositions.</p></div>
             <div class="fact-card"><strong>Per-thread</strong><p>Registers, stack, signal mask, scheduling attributes, <code>errno</code>, thread-local storage.</p></div>
@@ -617,6 +772,34 @@ struct config *p = atomic_load_explicit(
             { text: "A calls fork()", accent: true },
             { text: "child: only A, copied locks" }
           )}
+          <div class="terminal-figure">
+            <div class="terminal-titlebar"><span class="terminal-dots"><i></i><i></i><i></i></span>state at the instant thread A calls fork</div>
+            <div class="state-split">
+              <section class="state-panel">
+                <h3>Parent immediately before</h3>
+                <div class="state-row"><span class="state-key">thread A</span><span class="state-value">running fork</span></div>
+                <div class="state-row"><span class="state-key">thread B</span><span class="state-value">owns mutex M</span></div>
+                <div class="state-row"><span class="state-key">thread C</span><span class="state-value">waiting on condition</span></div>
+                <div class="state-row"><span class="state-key">mutex M bytes</span><span class="state-value">locked · owner = B</span></div>
+              </section>
+              <section class="state-panel">
+                <h3>Child immediately after</h3>
+                <div class="state-row"><span class="state-key">thread A</span><span class="state-value changed">exists · fork returns 0</span></div>
+                <div class="state-row"><span class="state-key">thread B</span><span class="state-value changed">does not exist</span></div>
+                <div class="state-row"><span class="state-key">thread C</span><span class="state-value changed">does not exist</span></div>
+                <div class="state-row"><span class="state-key">mutex M bytes</span><span class="state-value changed">still say locked by B</span></div>
+              </section>
+            </div>
+            <figcaption class="terminal-caption">The child receives copied memory, not a semantic reconstruction of every library object. No vanished thread can ever execute an unlock.</figcaption>
+          </div>
+          <div class="terminal-figure">
+            <div class="terminal-titlebar"><span class="terminal-dots"><i></i><i></i><i></i></span>copy-on-write page after fork</div>
+            <div class="step-trace">
+              <div class="trace-step"><span class="trace-number">1</span><strong>before either writes</strong><p>Parent virtual page <code>0x7000</code> and child virtual page <code>0x7000</code> both map physical frame A as read-only/COW.</p></div>
+              <div class="trace-step"><span class="trace-number">2</span><strong>child writes</strong><p>The write triggers a page fault. The kernel allocates frame B, copies A’s bytes into B, and maps the child page writable to B.</p></div>
+              <div class="trace-step"><span class="trace-number">3</span><strong>after the write</strong><p>Parent still sees frame A. Child sees frame B. Both pointers can have numeric value <code>0x7000</code> while naming different physical bytes.</p></div>
+            </div>
+          </div>
           <p>If B held a mutex at the instant of the fork, the child’s copied mutex may remain locked forever. Library background-thread state, condition variables, once controls, allocators, and network connections can all become inconsistent.</p>
           <h2>pthread_atfork</h2>
           <p>Handlers run before the fork, then in parent and child. They can coordinate application-owned locks, but composing independently registered handlers is difficult because prepare handlers run in reverse registration order while parent/child handlers run forward.</p>
@@ -641,6 +824,17 @@ struct config *p = atomic_load_explicit(
         summary: "Signals are asynchronous process notifications with per-process dispositions and per-thread masks. Delivery chooses an eligible thread and temporarily redirects its execution.",
         body: `
           <p>A signal is generated, becomes pending, and is delivered when an eligible thread does not block it. Its disposition may ignore it, perform the default action, or invoke a user handler.</p>
+          <div class="terminal-figure">
+            <div class="terminal-titlebar"><span class="terminal-dots"><i></i><i></i><i></i></span>SIGUSR1 delivery · what happens to thread B</div>
+            <div class="step-trace">
+              <div class="trace-step"><span class="trace-number">1</span><strong>signal generated</strong><p>Another process calls <code>kill(pid, SIGUSR1)</code>. The kernel marks SIGUSR1 pending for the target process.</p></div>
+              <div class="trace-step"><span class="trace-number">2</span><strong>choose a thread</strong><p>Thread A blocks SIGUSR1; thread B does not. The kernel chooses B when it is ready to return to userspace.</p></div>
+              <div class="trace-step"><span class="trace-number">3</span><strong>build signal frame</strong><p>On B’s stack, the kernel saves B’s register state: old RIP, RSP, flags, signal mask, and architecture context.</p></div>
+              <div class="trace-step"><span class="trace-number">4</span><strong>redirect execution</strong><p>The kernel changes B’s userspace RIP to a signal trampoline that calls <code>handler(SIGUSR1)</code>. Ordinary work is paused.</p></div>
+              <div class="trace-step"><span class="trace-number">5</span><strong>handler returns</strong><p>The trampoline invokes <code>rt_sigreturn</code>. The kernel restores the saved registers, and B resumes at the interrupted instruction.</p></div>
+            </div>
+            <figcaption class="terminal-caption">The handler is not a new thread. It temporarily borrows an existing thread’s execution context and usually its current stack.</figcaption>
+          </div>
           <h2>Process-directed and thread-directed</h2>
           <p>Some signals target the process and may be delivered to any unblocked thread. Others target a specific thread, such as synchronous faults caused by that thread’s instruction or signals sent with <code>pthread_kill()</code>.</p>
           <p>Standard signals generally do not queue multiple identical instances. Real-time signals do queue and carry ordering guarantees. A signal mask is per-thread; the disposition is process-wide.</p>
@@ -758,6 +952,19 @@ sigaltstack(&stack, NULL);
             { text: "relocations + TLS" },
             { text: "initializers" }
           )}
+          <div class="terminal-figure">
+            <div class="terminal-titlebar"><span class="terminal-dots"><i></i><i></i><i></i></span>dependency walk · ./app</div>
+            <div class="terminal-body">
+              <div class="layer-stack">
+                <div class="layer"><span class="layer-name">kernel</span><span class="layer-value">maps <code>./app</code> and its <code>PT_INTERP</code>: <code>/lib64/ld-linux-x86-64.so.2</code></span></div>
+                <div class="layer"><span class="layer-name">app</span><span class="layer-value"><code>DT_NEEDED: libssl.so.3</code> · <code>DT_NEEDED: libc.so.6</code></span></div>
+                <div class="layer"><span class="layer-name">libssl</span><span class="layer-value"><code>DT_NEEDED: libcrypto.so.3</code> · libc already discovered</span></div>
+                <div class="layer"><span class="layer-name">loader</span><span class="layer-value">maps each unique object, builds lookup scopes, applies relocations, creates TLS, runs initializers</span></div>
+                <div class="layer"><span class="layer-name">control</span><span class="layer-value">loader jumps to application entry code; startup code eventually calls <code>main</code></span></div>
+              </div>
+            </div>
+            <figcaption class="terminal-caption">A <code>DT_NEEDED</code> entry stores a library name, not a complete path. The loader’s search rules turn each name into a file.</figcaption>
+          </div>
           <h2>Search paths are contextual</h2>
           <p><code>RPATH</code>, <code>RUNPATH</code>, <code>LD_LIBRARY_PATH</code>, the loader cache, default directories, hardware capability directories, and secure-execution rules interact. Do not model lookup as merely “search <code>/usr/lib</code>.”</p>
           ${code("Shell · ask the loader", `readelf -lW ./program | grep INTERP
@@ -831,16 +1038,79 @@ if (error != NULL) {
         question: "How does position-independent code call an unknown address?",
         summary: "The Global Offset Table holds resolved addresses and the Procedure Linkage Table supplies call stubs. Together they enable dynamic calls without embedding fixed target addresses.",
         body: `
-          <p>In a common ELF design, compiled code calls a PLT entry. The entry jumps through a GOT slot. Initially that slot may route to the loader’s resolver; after binding it points at the chosen function.</p>
+          <p>Let’s follow one real-looking x86-64 call to <code>puts()</code>. The exact addresses vary in every binary, but the instructions and state changes below are representative of a lazily bound ELF executable.</p>
+
+          <h2>The three pieces</h2>
+          <div class="terminal-figure">
+            <div class="terminal-titlebar"><span class="terminal-dots"><i></i><i></i><i></i></span>process image · three different locations</div>
+            <div class="terminal-body">
+              <div class="layer-stack">
+                <div class="layer"><span class="layer-name">caller .text</span><span class="layer-value"><code>0x401146: call 0x401030 &lt;puts@plt&gt;</code></span></div>
+                <div class="layer"><span class="layer-name">PLT code</span><span class="layer-value"><code>0x401030: jmp *0x2fca(%rip)</code></span></div>
+                <div class="layer"><span class="layer-name">GOT data</span><span class="layer-value"><code>0x404000: 0x0000000000401036</code> — one writable address-sized slot</span></div>
+              </div>
+            </div>
+            <figcaption class="terminal-caption">PLT = executable instructions. GOT = data containing addresses. The caller knows the PLT address, but does not yet know the address of <code>puts</code> inside libc.</figcaption>
+          </div>
+
+          <h2>First call, one instruction at a time</h2>
+          <div class="terminal-figure">
+            <div class="terminal-titlebar"><span class="terminal-dots"><i></i><i></i><i></i></span>objdump -d ./hello · simplified</div>
+            <div class="terminal-body">
+              <div class="asm-grid">
+                <div class="asm-line active"><span class="asm-address">0x401146</span><span class="asm-op">call</span><span class="asm-target">0x401030 &lt;puts@plt&gt;</span><span class="asm-comment">push 0x40114b; go to PLT</span></div>
+                <div class="asm-line"><span class="asm-address">0x401030</span><span class="asm-op">jmp</span><span class="asm-target">*0x2fca(%rip)</span><span class="asm-comment">read pointer at 0x404000; go there</span></div>
+                <div class="asm-line"><span class="asm-address">0x401036</span><span class="asm-op">push</span><span class="asm-target">$0x0</span><span class="asm-comment">identify relocation slot 0</span></div>
+                <div class="asm-line"><span class="asm-address">0x40103b</span><span class="asm-op">jmp</span><span class="asm-target">0x401020 &lt;plt0&gt;</span><span class="asm-comment">enter dynamic-loader resolver</span></div>
+              </div>
+            </div>
+            <figcaption class="terminal-caption"><code>call</code> saves a return address. <code>jmp</code> does not; it only changes the instruction pointer. The first GOT value is <code>0x401036</code>, sending execution back into the second PLT instruction.</figcaption>
+          </div>
+
+          <div class="terminal-figure">
+            <div class="terminal-titlebar"><span class="terminal-dots"><i></i><i></i><i></i></span>CPU trace · first puts call</div>
+            <div class="step-trace">
+              <div class="trace-step"><span class="trace-number">1</span><strong><code>call puts@plt</code></strong><p>CPU pushes the next instruction address, <code>0x40114b</code>, onto the stack. Then <code>RIP = 0x401030</code>.</p></div>
+              <div class="trace-step"><span class="trace-number">2</span><strong><code>jmp *disp(%rip)</code></strong><p>The CPU adds displacement <code>0x2fca</code> to RIP after the jump instruction: <code>0x401036 + 0x2fca = 0x404000</code>. It reads eight bytes from that GOT address.</p></div>
+              <div class="trace-step"><span class="trace-number">3</span><strong>GOT says <code>0x401036</code></strong><p>This is the first call, so the slot points back into the PLT. CPU sets <code>RIP = 0x401036</code>, pushes relocation index <code>0</code>, and jumps through PLT0.</p></div>
+              <div class="trace-step"><span class="trace-number">4</span><strong>loader resolves <code>puts</code></strong><p>The resolver reads the relocation and symbol tables, searches loaded objects, and finds libc’s <code>puts</code> at example address <code>0x7ffff7e41980</code>.</p></div>
+              <div class="trace-step"><span class="trace-number">5</span><strong>loader patches GOT</strong><p>It writes <code>0x7ffff7e41980</code> into address <code>0x404000</code>, then transfers control to that address. <code>puts</code> eventually returns to saved address <code>0x40114b</code>.</p></div>
+            </div>
+          </div>
+
+          <h2>What changed in memory?</h2>
+          <div class="terminal-figure">
+            <div class="terminal-titlebar"><span class="terminal-dots"><i></i><i></i><i></i></span>GOT slot at virtual address 0x404000</div>
+            <div class="state-split">
+              <section class="state-panel">
+                <h3>Before first call</h3>
+                <div class="state-row"><span class="state-key">stored value</span><span class="state-value">0x0000000000401036</span></div>
+                <div class="state-row"><span class="state-key">points to</span><span class="state-value">puts@plt + 6</span></div>
+                <div class="state-row"><span class="state-key">meaning</span><span class="state-value">please resolve me</span></div>
+              </section>
+              <section class="state-panel">
+                <h3>After resolver runs</h3>
+                <div class="state-row"><span class="state-key">stored value</span><span class="state-value changed">0x00007ffff7e41980</span></div>
+                <div class="state-row"><span class="state-key">points to</span><span class="state-value changed">libc puts</span></div>
+                <div class="state-row"><span class="state-key">meaning</span><span class="state-value changed">jump directly here</span></div>
+              </section>
+            </div>
+            <figcaption class="terminal-caption">The GOT slot is eight bytes on x86-64 because it stores one 64-bit virtual address. The code did not change; only this data slot changed.</figcaption>
+          </div>
+
+          <h2>Second call: the short path</h2>
           ${diagram(
-            { text: "call foo@PLT" },
-            { text: "PLT stub" },
-            { text: "GOT[foo]", accent: true },
-            { text: "resolved foo" }
+            { text: "call puts@PLT" },
+            { text: "jmp *GOT[puts]" },
+            { text: "GOT contains libc address", accent: true },
+            { text: "puts executes" }
           )}
+          <p>The same <code>call</code> and PLT <code>jmp</code> execute again. This time the GOT read produces the real libc address, so the resolver path disappears. With immediate binding, the loader fills this slot during startup instead.</p>
+
           <h2>Lazy versus immediate binding</h2>
           <p>Lazy binding postpones function resolution until first use. <code>RTLD_NOW</code> or <code>LD_BIND_NOW</code> resolves eagerly. RELRO can make relocation regions read-only after startup; full RELRO combined with eager binding hardens GOT slots against later writes.</p>
-          <p>Not every architecture or toolchain emits identical sequences, and optimized code may bypass the PLT. Always inspect the produced binary.</p>
+          ${callout("Read the asterisk literally", `<code>jmp 0x404000</code> would jump <em>to</em> address <code>0x404000</code>. <code>jmp *0x2fca(%rip)</code> first reads an address from memory, then jumps to the address it read. That extra memory lookup is the indirection.`)}
+          <p>Not every architecture or toolchain emits identical sequences, and optimized code may bypass the PLT. The concrete trace above is the classic x86-64 lazy-binding shape; inspect the produced binary to see its actual form.</p>
           ${code("Shell · make indirection visible", `objdump -d --disassemble=foo@plt ./program
 readelf -rW ./program
 readelf -dW ./program | grep -E 'BIND_NOW|FLAGS'`)}
@@ -915,6 +1185,30 @@ readelf -dW ./program | grep -E 'BIND_NOW|FLAGS'`)}
             { text: "syscall ABI", accent: true },
             { text: "kernel implementation" }
           )}
+          <div class="terminal-figure">
+            <div class="terminal-titlebar"><span class="terminal-dots"><i></i><i></i><i></i></span>x86-64 · read(3, buffer, 100)</div>
+            <div class="step-trace">
+              <div class="trace-step"><span class="trace-number">1</span><strong>C calls libc</strong><p>Normal function-call ABI places <code>fd=3</code> in RDI, <code>buffer</code> in RSI, and <code>count=100</code> in RDX.</p></div>
+              <div class="trace-step"><span class="trace-number">2</span><strong>wrapper selects syscall</strong><p>libc places <code>SYS_read = 0</code> in RAX. Argument registers already match the first three Linux syscall arguments.</p></div>
+              <div class="trace-step"><span class="trace-number">3</span><strong><code>syscall</code></strong><p>The CPU saves the userspace return RIP in RCX, saves flags in R11, switches privilege level and kernel stack, then enters the configured kernel syscall entry point.</p></div>
+              <div class="trace-step"><span class="trace-number">4</span><strong>kernel executes read</strong><p>The kernel validates userspace buffer <code>RSI</code>, looks up descriptor slot <code>RDI = 3</code>, and invokes that open file’s read operation.</p></div>
+              <div class="trace-step"><span class="trace-number">5</span><strong>return in RAX</strong><p>Example success: <code>RAX = 37</code> bytes. Example kernel error: <code>RAX = -9</code> for <code>EBADF</code>.</p></div>
+              <div class="trace-step"><span class="trace-number">6</span><strong>libc translates error</strong><p>For <code>-9</code>, libc writes <code>errno = 9</code> in thread-local storage and returns <code>-1</code> to C. For success, it returns 37 unchanged.</p></div>
+            </div>
+          </div>
+          <div class="terminal-figure">
+            <div class="terminal-titlebar"><span class="terminal-dots"><i></i><i></i><i></i></span>register snapshot immediately before syscall</div>
+            <div class="terminal-body">
+              <div class="memory-table">
+                <div class="memory-row header"><span class="memory-cell">register</span><span class="memory-cell">value</span><span class="memory-cell">meaning</span></div>
+                <div class="memory-row"><span class="memory-cell">RAX</span><span class="memory-cell">0</span><span class="memory-cell">syscall number: read</span></div>
+                <div class="memory-row"><span class="memory-cell">RDI</span><span class="memory-cell">3</span><span class="memory-cell">argument 1: file descriptor</span></div>
+                <div class="memory-row"><span class="memory-cell">RSI</span><span class="memory-cell">0x7fff…e900</span><span class="memory-cell">argument 2: userspace destination address</span></div>
+                <div class="memory-row"><span class="memory-cell">RDX</span><span class="memory-cell">100</span><span class="memory-cell">argument 3: maximum byte count</span></div>
+              </div>
+            </div>
+            <figcaption class="terminal-caption">This is the Linux x86-64 syscall ABI. AArch64 and other architectures use different registers and transition instructions.</figcaption>
+          </div>
           <h2>Why bypass libc?</h2>
           <p>Raw syscalls can avoid symbol interposition or reduce dependencies in a signal-sensitive path. But they also bypass portability, pthread cancellation integration, time64 adaptation, restart behavior, and libc compatibility logic.</p>
           ${callout("A raw syscall is a sharp platform contract", `Syscall numbers, argument registers, availability, and structures vary by architecture and kernel. Prefer libc unless bypassing it solves a concrete problem and the platform surface is deliberately contained.`, "warning")}
