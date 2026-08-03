@@ -48,7 +48,7 @@ const groups = [
           <div class="fact-grid">
             <div class="fact-card"><strong>Language vs. implementation</strong><p>ISO C does not define pthreads, ELF, <code>fork()</code>, or <code>mmap()</code>. Those arrive from POSIX, Linux, libc, and compiler extensions.</p></div>
             <div class="fact-card"><strong>Process vs. thread</strong><p>A process owns an address space and resources. Threads are execution streams sharing most of that state.</p></div>
-            <div class="fact-card"><strong>Kernel vs. libc</strong><p>Your code usually calls a libc wrapper. The wrapper may issue a syscall, use the vDSO, cache state, or do substantial work itself.</p></div>
+            <div class="fact-card"><strong>Kernel vs. libc</strong><p>A C program usually calls a libc wrapper. The wrapper may issue a syscall, use the vDSO, cache state, or do substantial work itself.</p></div>
             <div class="fact-card"><strong>API vs. ABI</strong><p>The API is what source code calls. The ABI is the binary-level agreement that lets independently built pieces actually work together.</p></div>
           </div>
 
