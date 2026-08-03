@@ -524,6 +524,7 @@ prlimit --pid $PID`)}
         summary: "A file descriptor indexes a process table entry referring to an open file description. Duplicated descriptors can share offset and status flags while retaining descriptor-local flags.",
         body: `
           <p>A file descriptor is just a small non-negative integer in your program—often <code>0</code>, <code>1</code>, <code>2</code>, or <code>3</code>. It is <strong>not a pointer</strong>, does not contain the file’s bytes, and does not contain a pathname. The kernel uses it as an array index.</p>
+          <div class="timeline-demo" data-timeline="fd"></div>
 
           <h2>What is physically stored in the C variable?</h2>
           <div class="terminal-figure">
@@ -1039,6 +1040,7 @@ if (error != NULL) {
         summary: "The Global Offset Table holds resolved addresses and the Procedure Linkage Table supplies call stubs. Together they enable dynamic calls without embedding fixed target addresses.",
         body: `
           <p>Let’s follow one real-looking x86-64 call to <code>puts()</code>. The exact addresses vary in every binary, but the instructions and state changes below are representative of a lazily bound ELF executable.</p>
+          <div class="timeline-demo" data-timeline="plt"></div>
 
           <h2>The three pieces</h2>
           <div class="terminal-figure">
@@ -1179,6 +1181,7 @@ readelf -dW ./program | grep -E 'BIND_NOW|FLAGS'`)}
         summary: "A syscall is an architecture-defined transition into a kernel service. libc normally wraps it, translating calling conventions, cancellation rules, and errors.",
         body: `
           <p>A C call such as <code>read()</code> is usually a libc function. Its implementation arranges the kernel syscall number and arguments, executes the architecture’s transition instruction, and converts a negative kernel result into <code>-1</code> plus <code>errno</code>.</p>
+          <div class="timeline-demo" data-timeline="syscall"></div>
           ${diagram(
             { text: "C API call" },
             { text: "libc wrapper" },
@@ -1318,6 +1321,81 @@ gdb --args ./program`)}
   }
 ];
 
+const timelineDefinitions = {};
+
+timelineDefinitions.plt = {
+  title: "LIVE TRACE · LAZY PLT/GOT RESOLUTION",
+  programLabel: "x86-64 instructions / loader actions",
+  path: ["caller", "PLT", "GOT", "loader", "libc", "caller"],
+  lines: [
+    ["0x401146", "call 0x401030 &lt;puts@plt&gt;"],
+    ["0x401030", "jmp *0x2fca(%rip)"],
+    ["0x401036", "push $0x0"],
+    ["0x40103b", "jmp 0x401020 &lt;plt0&gt;"],
+    ["ld.so", "resolve(symbol = puts)"],
+    ["ld.so", "GOT[puts] = 0x7ffff7e41980"],
+    ["0x7ffff7e41980", "puts(...)"],
+    ["0x40114b", "next caller instruction"]
+  ],
+  frames: [
+    { active: 0, path: 0, title: "About to call", text: "RIP points at call. The GOT still points back into the PLT resolver path.", state: [["RIP", "0x401146"], ["RSP", "0x7fff…fee8"], ["stack top", "caller data"], ["GOT[puts]", "0x401036 → PLT+6"]] },
+    { active: 1, path: 1, title: "call transfers control", text: "call pushes its return address, then sets RIP to the puts PLT entry.", state: [["RIP", "0x401030", true], ["RSP", "0x7fff…fee0", true], ["stack top", "0x40114b", true], ["GOT[puts]", "0x401036 → PLT+6"]] },
+    { active: 2, path: 2, title: "indirect jump reads the GOT", text: "The PLT jump reads eight bytes at 0x404000. They contain 0x401036, so RIP goes there.", state: [["RIP", "0x401036", true], ["RSP", "0x7fff…fee0"], ["read address", "0x404000", true], ["GOT[puts]", "0x401036 → PLT+6"]] },
+    { active: 3, path: 1, title: "identify the relocation", text: "push $0 records relocation slot 0. PLT0 then enters the dynamic loader.", state: [["RIP", "0x40103b", true], ["RSP", "0x7fff…fed8", true], ["stack top", "relocation #0", true], ["GOT[puts]", "0x401036 → PLT+6"]] },
+    { active: 4, path: 3, title: "loader searches symbols", text: "The resolver follows relocation #0 to the name puts, then searches the loaded-object lookup scope.", state: [["RIP", "ld.so resolver", true], ["symbol", "puts", true], ["found in", "libc.so.6", true], ["GOT[puts]", "0x401036 → PLT+6"]] },
+    { active: 5, path: 3, title: "the mutation", text: "The loader overwrites the GOT slot. This is the single memory edit that makes later calls fast.", state: [["RIP", "ld.so resolver"], ["write address", "0x404000", true], ["old 8 bytes", "36 10 40 00 00 00 00 00"], ["GOT[puts]", "0x7ffff7e41980 → libc", true]] },
+    { active: 6, path: 4, title: "real puts runs", text: "The loader transfers control to the newly resolved address inside libc.", state: [["RIP", "0x7ffff7e41980", true], ["RSP", "0x7fff…fed8"], ["stack return", "0x40114b"], ["GOT[puts]", "0x7ffff7e41980 → libc"]] },
+    { active: 7, path: 5, title: "return to the caller", text: "puts returns to the address saved by the original call. The next call will skip frames 2–5.", state: [["RIP", "0x40114b", true], ["RSP", "0x7fff…fee8", true], ["result", "puts completed"], ["GOT[puts]", "0x7ffff7e41980 → libc"]] }
+  ]
+};
+
+timelineDefinitions.fd = {
+  title: "LIVE STATE · FILE DESCRIPTOR LIFETIME",
+  programLabel: "C operations",
+  path: ["C integer", "fd table", "struct file", "file bytes"],
+  lines: [
+    ["1", "fd3 = open(\"notes.txt\", O_RDONLY)"],
+    ["2", "fd4 = dup(fd3)"],
+    ["3", "read(fd3, buffer, 100)"],
+    ["4", "read(fd4, buffer, 20)"],
+    ["5", "close(fd3)"],
+    ["6", "close(fd4)"]
+  ],
+  frames: [
+    { active: 0, path: 0, title: "before open", text: "The variables do not yet hold usable descriptors, and there is no open file description.", state: [["fd3", "uninitialized"], ["fd4", "uninitialized"], ["refcount", "0"], ["file offset", "—"]] },
+    { active: 0, path: 2, title: "open creates state", text: "The kernel creates open description A, puts a pointer to A in slot 3, and returns integer 3.", state: [["fd3", "3 → table[3] → A", true], ["fd4", "uninitialized"], ["refcount A", "1", true], ["offset A", "0", true]] },
+    { active: 1, path: 2, title: "dup copies the pointer", text: "Slot 4 receives another pointer to A. It does not create a second independent file position.", state: [["fd3", "3 → A"], ["fd4", "4 → A", true], ["refcount A", "2", true], ["offset A", "0"]] },
+    { active: 2, path: 3, title: "read through fd 3", text: "The kernel reads bytes 0–99 and edits the offset stored in shared description A.", state: [["fd3", "3 → A"], ["fd4", "4 → A"], ["bytes returned", "100", true], ["offset A", "100", true]] },
+    { active: 3, path: 3, title: "fd 4 observes shared offset", text: "Because fd 4 points to the same A, its read begins at byte 100 and advances A to 120.", state: [["fd3", "3 → A"], ["fd4", "4 → A"], ["bytes returned", "20", true], ["offset A", "120", true]] },
+    { active: 4, path: 1, title: "close removes one slot", text: "Slot 3 becomes empty. A remains alive because slot 4 still holds a reference.", state: [["fd3", "3 → empty", true], ["fd4", "4 → A"], ["refcount A", "1", true], ["offset A", "120"]] },
+    { active: 5, path: 1, title: "last close releases A", text: "Slot 4 becomes empty. The reference count reaches zero, so the kernel can destroy A.", state: [["fd3", "3 → empty"], ["fd4", "4 → empty", true], ["refcount A", "0", true], ["open state", "destroyed", true]] }
+  ]
+};
+
+timelineDefinitions.syscall = {
+  title: "LIVE TRACE · READ SYSCALL",
+  programLabel: "x86-64 boundary crossing",
+  path: ["C caller", "libc", "CPU gate", "kernel", "libc", "C caller"],
+  lines: [
+    ["user", "read(3, buffer, 100)"],
+    ["libc", "mov $0, %rax        # SYS_read"],
+    ["libc", "syscall"],
+    ["kernel", "fdget(3) → file operation"],
+    ["kernel", "return -9          # -EBADF"],
+    ["libc", "errno = 9; return -1"],
+    ["user", "if (result == -1) ..."]
+  ],
+  frames: [
+    { active: 0, path: 0, title: "ordinary function call", text: "The C ABI puts the three arguments into RDI, RSI, and RDX before entering libc.", state: [["RDI", "3 · fd"], ["RSI", "0x7fff…e900 · buffer"], ["RDX", "100 · count"], ["privilege", "userspace"]] },
+    { active: 1, path: 1, title: "select the kernel operation", text: "The wrapper writes syscall number 0, meaning read on Linux x86-64, into RAX.", state: [["RAX", "0 · SYS_read", true], ["RDI", "3"], ["RSI", "0x7fff…e900"], ["RDX", "100"]] },
+    { active: 2, path: 2, title: "execute syscall", text: "The CPU saves the userspace return location, switches stacks and privilege, and jumps to the kernel entry point.", state: [["RIP", "kernel entry", true], ["RCX", "saved user RIP", true], ["R11", "saved user flags", true], ["privilege", "kernel", true]] },
+    { active: 3, path: 3, title: "kernel follows fd 3", text: "The kernel uses integer 3 to look up the descriptor slot. In this example the slot is invalid.", state: [["syscall", "read"], ["fd", "3"], ["fd table[3]", "empty", true], ["result RAX", "pending"]] },
+    { active: 4, path: 3, title: "kernel returns a negative error", text: "The kernel ABI returns -EBADF directly in RAX. It does not write the userspace errno variable.", state: [["RAX", "-9", true], ["meaning", "EBADF"], ["privilege", "returning to user"], ["errno", "unchanged"]] },
+    { active: 5, path: 4, title: "libc translates conventions", text: "The wrapper recognizes the negative kernel result, stores positive 9 in thread-local errno, and chooses C return value -1.", state: [["kernel result", "-9"], ["errno", "9 · EBADF", true], ["C return", "-1", true], ["privilege", "userspace"]] },
+    { active: 6, path: 5, title: "caller handles failure", text: "The C program first sees return value -1; only then is errno meaningful for this call.", state: [["result", "-1"], ["errno", "9 · EBADF"], ["RIP", "caller error branch", true], ["privilege", "userspace"]] }
+  ]
+};
+
 const entries = groups.flatMap((group) => group.entries.map((entry) => ({ ...entry, group: group.title })));
 const bySlug = new Map(entries.map((entry) => [entry.slug, entry]));
 const storage = {
@@ -1373,6 +1451,170 @@ function escapeHtml(value) {
   })[character]);
 }
 
+let timelineCleanups = [];
+
+function disposeTimelines() {
+  timelineCleanups.forEach((cleanup) => cleanup());
+  timelineCleanups = [];
+}
+
+function timelineMarkup(definition) {
+  return `
+    <section class="timeline-player" aria-label="${escapeHtml(definition.title)}">
+      <div class="terminal-titlebar">
+        <span class="terminal-dots"><i></i><i></i><i></i></span>
+        ${escapeHtml(definition.title)} · 1 STEP / SECOND
+      </div>
+      <div class="timeline-stage">
+        <div class="timeline-program">
+          <span class="timeline-panel-label">${escapeHtml(definition.programLabel)}</span>
+          <div class="timeline-code">
+            ${definition.lines.map(([address, instruction], index) => `
+              <div class="timeline-line" data-line="${index}">
+                <span class="timeline-pc" aria-hidden="true">▶</span>
+                <span class="timeline-address">${escapeHtml(address)}</span>
+                <span class="timeline-instruction">${instruction}</span>
+              </div>`).join("")}
+          </div>
+          <div class="timeline-path" aria-label="Control flow">
+            ${definition.path.map((node, index) => `${index ? '<span class="timeline-path-edge"></span>' : ""}<span class="timeline-path-node" data-path="${index}">${escapeHtml(node)}</span>`).join("")}
+          </div>
+        </div>
+        <div class="timeline-state">
+          <span class="timeline-panel-label">live state</span>
+          <div class="timeline-state-grid"></div>
+          <div class="timeline-explanation"></div>
+          <span class="timeline-live" aria-live="polite"></span>
+        </div>
+      </div>
+      <div class="timeline-controls">
+        <div class="timeline-buttons">
+          <button class="timeline-button timeline-prev" type="button" aria-label="Previous step">←</button>
+          <button class="timeline-button timeline-play" type="button" aria-label="Pause animation">❚❚</button>
+          <button class="timeline-button timeline-next" type="button" aria-label="Next step">→</button>
+        </div>
+        <input class="timeline-range" type="range" min="0" max="${definition.frames.length - 1}" value="0" step="1" aria-label="Animation timeline" />
+        <span class="timeline-counter"></span>
+      </div>
+    </section>`;
+}
+
+function mountTimeline(host, definition) {
+  host.innerHTML = timelineMarkup(definition);
+  const player = host.querySelector(".timeline-player");
+  const lines = [...player.querySelectorAll(".timeline-line")];
+  const pathNodes = [...player.querySelectorAll(".timeline-path-node")];
+  const pathEdges = [...player.querySelectorAll(".timeline-path-edge")];
+  const stateGrid = player.querySelector(".timeline-state-grid");
+  const explanation = player.querySelector(".timeline-explanation");
+  const live = player.querySelector(".timeline-live");
+  const range = player.querySelector(".timeline-range");
+  const counter = player.querySelector(".timeline-counter");
+  const playButton = player.querySelector(".timeline-play");
+  let frameIndex = 0;
+  let timer = null;
+  let observer = null;
+  let started = false;
+
+  function draw(announce = true) {
+    const frame = definition.frames[frameIndex];
+    lines.forEach((line, index) => {
+      line.classList.toggle("current", index === frame.active);
+      line.classList.toggle("visited", index < frame.active);
+    });
+    pathNodes.forEach((node, index) => node.classList.toggle("active", index === frame.path));
+    pathEdges.forEach((edge, index) => edge.classList.toggle("active", index < frame.path));
+    stateGrid.innerHTML = frame.state.map(([key, value, changed]) => `
+      <div class="timeline-state-row ${changed ? "changed" : ""}">
+        <span class="timeline-state-key">${escapeHtml(key)}</span>
+        <span class="timeline-state-value">${escapeHtml(value)}</span>
+      </div>`).join("");
+    explanation.innerHTML = `<strong>${escapeHtml(frame.title)}</strong>${escapeHtml(frame.text)}`;
+    range.value = String(frameIndex);
+    counter.textContent = `${frameIndex + 1} / ${definition.frames.length}`;
+    if (announce) live.textContent = `Step ${frameIndex + 1}: ${frame.title}. ${frame.text}`;
+  }
+
+  function pause() {
+    if (timer !== null) window.clearInterval(timer);
+    timer = null;
+    playButton.textContent = "▶";
+    playButton.classList.remove("playing");
+    playButton.setAttribute("aria-label", "Play animation");
+  }
+
+  function play() {
+    if (timer !== null) return;
+    started = true;
+    if (frameIndex === definition.frames.length - 1) {
+      frameIndex = 0;
+      draw(false);
+    }
+    playButton.textContent = "❚❚";
+    playButton.classList.add("playing");
+    playButton.setAttribute("aria-label", "Pause animation");
+    timer = window.setInterval(() => {
+      if (frameIndex >= definition.frames.length - 1) {
+        pause();
+        return;
+      }
+      frameIndex += 1;
+      draw();
+    }, 1000);
+  }
+
+  function seek(nextIndex) {
+    frameIndex = Math.max(0, Math.min(definition.frames.length - 1, nextIndex));
+    draw();
+  }
+
+  player.querySelector(".timeline-prev").addEventListener("click", () => {
+    started = true;
+    pause();
+    seek(frameIndex - 1);
+  });
+  player.querySelector(".timeline-next").addEventListener("click", () => {
+    started = true;
+    pause();
+    seek(frameIndex + 1);
+  });
+  playButton.addEventListener("click", () => timer === null ? play() : pause());
+  range.addEventListener("input", () => {
+    started = true;
+    pause();
+    seek(Number(range.value));
+  });
+
+  draw(false);
+  pause();
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (!reduceMotion && "IntersectionObserver" in window) {
+    observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting) && !started) {
+        play();
+        observer.disconnect();
+      }
+    }, { threshold: 0.35 });
+    observer.observe(player);
+  } else if (!reduceMotion) {
+    play();
+  } else {
+    pause();
+  }
+
+  timelineCleanups.push(() => {
+    pause();
+    if (observer) observer.disconnect();
+  });
+}
+
+function mountTimelines() {
+  article.querySelectorAll("[data-timeline]").forEach((host) => {
+    const definition = timelineDefinitions[host.dataset.timeline];
+    if (definition) mountTimeline(host, definition);
+  });
+}
+
 function renderToc(query = "") {
   const normalized = query.trim().toLowerCase();
   const html = groups.map((group) => {
@@ -1399,6 +1641,7 @@ function renderToc(query = "") {
 
 function renderArticle(slug, pushFocus = false) {
   const entry = bySlug.get(slug) || bySlug.get("readme");
+  disposeTimelines();
   state.current = entry.slug;
   state.read.add(entry.slug);
   storage.set("linux-field-guide-read", JSON.stringify([...state.read]));
@@ -1433,6 +1676,8 @@ function renderArticle(slug, pushFocus = false) {
         ${next ? `<a href="#${next.slug}" data-route="${next.slug}"><span>Next →</span><strong>${escapeHtml(next.title)}</strong></a>` : `<a href="#readme" data-route="readme"><span>Complete</span><strong>Return to the beginning</strong></a>`}
       </nav>
     </div>`;
+
+  mountTimelines();
 
   document.title = `${entry.title} · Linux Systems Field Guide`;
   renderToc(search.value);
