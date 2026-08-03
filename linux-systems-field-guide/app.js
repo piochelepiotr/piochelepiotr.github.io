@@ -9,7 +9,7 @@ const code = (label, source) => `
 const callout = (title, body, kind = "") => `
   <aside class="callout ${kind}"><strong>${title}</strong><p>${body}</p></aside>`;
 const practiceNote = (body) => `
-  <aside class="repo-note"><span class="label">In practice</span><p>${body}</p></aside>`;
+  <aside class="practice-note"><span class="label">In practice</span><p>${body}</p></aside>`;
 const diagram = (...nodes) => `
   <div class="diagram"><div class="diagram-row">${nodes
     .map((node, index) => `${index ? '<span class="diagram-arrow">→</span>' : ""}<span class="diagram-node ${node.accent ? "accent" : ""}">${node.text}</span>`)
@@ -85,7 +85,7 @@ void f(void) {
     /* each pointer names storage with different lifetime rules */
     free(heap);
 }`)}
-          ${callout("Portable C is not the whole repo", `GNU attributes such as <code>weak</code>, <code>constructor</code>, and <code>cleanup</code>, inline assembly, ELF visibility, and raw syscalls are implementation extensions. Treat each as an explicit portability decision.`, "warning")}
+          ${callout("Portable C is not the whole system", `GNU attributes such as <code>weak</code>, <code>constructor</code>, and <code>cleanup</code>, inline assembly, ELF visibility, and raw syscalls are implementation extensions. Treat each as an explicit portability decision.`, "warning")}
           ${practiceNote(`Production systems libraries often concentrate atomic, locking, and platform details in small compatibility headers so the rest of the code can use a narrower, reviewed contract.`)}
         `,
         connections: ["translation-unit", "abi", "atomics", "thread-local-storage", "undefined-behavior"],

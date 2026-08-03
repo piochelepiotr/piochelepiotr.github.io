@@ -372,8 +372,7 @@ button {
   margin-left: auto;
 }
 
-.icon-button,
-.repo-link {
+.icon-button {
   height: 34px;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -385,15 +384,6 @@ button {
   display: grid;
   place-items: center;
   cursor: pointer;
-}
-
-.repo-link {
-  display: inline-flex;
-  align-items: center;
-  padding: 0 11px;
-  color: inherit;
-  text-decoration: none;
-  font: 500 11px/1 "DM Mono", monospace;
 }
 
 .menu-button {
@@ -653,7 +643,7 @@ code {
   font: 500 11px/1 "DM Mono", monospace;
 }
 
-.repo-note {
+.practice-note {
   margin: 36px 0;
   padding: 22px;
   border: 1px solid var(--line);
@@ -667,7 +657,7 @@ code {
   );
 }
 
-.repo-note .label {
+.practice-note .label {
   display: block;
   margin-bottom: 7px;
   color: var(--muted);
@@ -676,7 +666,7 @@ code {
   text-transform: uppercase;
 }
 
-.repo-note p {
+.practice-note p {
   margin: 0;
 }
 
@@ -848,10 +838,6 @@ code {
 }
 
 @media (max-width: 600px) {
-  .repo-link {
-    display: none;
-  }
-
   .article {
     width: min(100% - 32px, 760px);
     padding-bottom: 65px;
