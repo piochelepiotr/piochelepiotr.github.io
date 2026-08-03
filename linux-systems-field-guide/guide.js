@@ -882,7 +882,7 @@ readelf -dW ./program | grep -E 'BIND_NOW|FLAGS'`)}
         summary: "Calling conventions define argument locations, return values, preserved registers, stack alignment, variadic behavior, and special state required at binary boundaries.",
         body: `
           <p>The caller and callee divide responsibility. Caller-saved registers may be overwritten by the call. Callee-saved registers must be restored before return. The stack pointer must meet an alignment rule at specified points.</p>
-          <h2>Why instrumentation exposes mistakes</h2>
+          <h2>Why low-level boundaries expose mistakes</h2>
           <p>Ordinary compiled calls automatically obey the convention. Hand-written assembly, generated trampolines, callbacks cast to the wrong type, and variadic forwarding can violate it. Symptoms may appear far away: corrupted registers, crashes only with vector instructions, or broken unwinding.</p>
           ${code("C · type is part of the protocol", `typedef int (*operation_fn)(void *context, size_t size);
 
